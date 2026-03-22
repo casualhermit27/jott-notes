@@ -1,0 +1,558 @@
+import SwiftUI
+import AppKit
+
+struct DetailView: View {
+    @ObservedObject var viewModel: OverlayViewModel
+
+    var body: some View {
+        ZStack {
+            // Background - light or dark
+            if viewModel.isDarkMode {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.12, green: 0.12, blue: 0.13),
+                        Color(red: 0.15, green: 0.14, blue: 0.16)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            } else {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.97, green: 0.98, blue: 0.95),
+                        Color(red: 0.96, green: 0.97, blue: 0.98)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            }
+
+            VStack(spacing: 0) {
+                // Header
+                HStack(spacing: 10) {
+                    Button(action: {
+                        viewModel.selectedNote = nil
+                        viewModel.selectedReminder = nil
+                        viewModel.selectedMeeting = nil
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(viewModel.isDarkMode ? Color(red: 0.75, green: 0.82, blue: 0.75) : Color(red: 0.45, green: 0.75, blue: 0.55))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    if let note = viewModel.selectedNote, !viewModel.isEditingNote {
+                        // Open in editor (Cmd+O)
+                        Button(action: { viewModel.openNoteInEditor(note) }) {
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(viewModel.isDarkMode ? Color(red: 0.75, green: 0.82, blue: 0.75) : Color(red: 0.45, green: 0.75, blue: 0.55))
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut("o", modifiers: .command)
+
+                        // Copy note text
+                        Button(action: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(note.text, forType: .string)
+                        }) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(viewModel.isDarkMode ? Color(red: 0.75, green: 0.82, blue: 0.75) : Color(red: 0.45, green: 0.75, blue: 0.55))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: { viewModel.startEditingNote(note) }) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(viewModel.isDarkMode ? Color(red: 0.75, green: 0.82, blue: 0.75) : Color(red: 0.45, green: 0.75, blue: 0.55))
+                        }
+                        .buttonStyle(.plain)
+
+                        // Delete note (Cmd+Delete)
+                        Button(action: {
+                            viewModel.deleteNote(note.id)
+                            viewModel.selectedNote = nil
+                        }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color.red.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.delete, modifiers: .command)
+                    } else if viewModel.isEditingNote {
+                        HStack(spacing: 6) {
+                            Button(action: { viewModel.saveEditedNote(viewModel.selectedNote!) }) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.green)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button(action: { viewModel.cancelEditingNote() }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if let _ = viewModel.selectedNote, !viewModel.isEditingNote {
+                        Text("NOTE")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.75, green: 0.82, blue: 0.75),
+                                        Color(red: 0.78, green: 0.84, blue: 0.78),
+                                        Color(red: 0.72, green: 0.80, blue: 0.72),
+                                        Color(red: 0.76, green: 0.83, blue: 0.76),
+                                        Color(red: 0.74, green: 0.81, blue: 0.74)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(5)
+                    } else if let _ = viewModel.selectedReminder {
+                        Text("REMINDER")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.85, green: 0.65, blue: 0.75),
+                                        Color(red: 0.88, green: 0.70, blue: 0.78),
+                                        Color(red: 0.82, green: 0.62, blue: 0.72),
+                                        Color(red: 0.86, green: 0.68, blue: 0.76),
+                                        Color(red: 0.84, green: 0.64, blue: 0.74)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(5)
+                    } else if let _ = viewModel.selectedMeeting {
+                        Text("MEETING")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.92, green: 0.72, blue: 0.62),
+                                        Color(red: 0.94, green: 0.76, blue: 0.68),
+                                        Color(red: 0.90, green: 0.70, blue: 0.60),
+                                        Color(red: 0.93, green: 0.74, blue: 0.65),
+                                        Color(red: 0.91, green: 0.71, blue: 0.61)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(5)
+                    }
+                }
+                .padding(12)
+                .background(viewModel.isDarkMode ? Color.white.opacity(0.05) : Color.white.opacity(0.8))
+                .border(Color.gray.opacity(viewModel.isDarkMode ? 0.2 : 0.1), width: 0.5)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if let note = viewModel.selectedNote {
+                            NoteDetailContent(note: note, viewModel: viewModel)
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        } else if let reminder = viewModel.selectedReminder {
+                            ReminderDetailContent(reminder: reminder, viewModel: viewModel)
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        } else if let meeting = viewModel.selectedMeeting {
+                            MeetingDetailContent(meeting: meeting, viewModel: viewModel)
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+    }
+}
+
+struct NoteDetailContent: View {
+    let note: Note
+    @ObservedObject var viewModel: OverlayViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            if viewModel.isEditingNote {
+                TextEditor(text: $viewModel.editingNoteText)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(viewModel.isDarkMode ? .white : .black)
+                    .frame(minHeight: 80)
+                    .padding(7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 0.75)
+                    )
+            } else {
+                Text(note.text)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(viewModel.isDarkMode ? .white : .black)
+                    .lineSpacing(1.5)
+            }
+
+            Divider()
+                .padding(.vertical, 3)
+
+            VStack(alignment: .leading, spacing: 7) {
+                DetailInfoRow(label: "Created", value: formatDate(note.timestamp), isDarkMode: viewModel.isDarkMode)
+                DetailInfoRow(label: "Modified", value: formatDate(note.modifiedAt), isDarkMode: viewModel.isDarkMode)
+            }
+
+            if !note.tags.isEmpty {
+                Divider()
+                    .padding(.vertical, 3)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("TAGS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .tracking(0.5)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(note.tags, id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color(red: 0.75, green: 0.82, blue: 0.75),
+                                            Color(red: 0.78, green: 0.84, blue: 0.78),
+                                            Color(red: 0.72, green: 0.80, blue: 0.72)
+                                        ]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .cornerRadius(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LinearGradient(
+                    gradient: Gradient(colors: viewModel.isDarkMode ? [
+                        Color(red: 0.20, green: 0.20, blue: 0.21),
+                        Color(red: 0.23, green: 0.22, blue: 0.24)
+                    ] : [
+                        Color(red: 0.98, green: 0.995, blue: 0.96),
+                        Color(red: 0.97, green: 0.99, blue: 0.98)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.gray.opacity(viewModel.isDarkMode ? 0.2 : 0.1), lineWidth: 0.5))
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+struct ReminderDetailContent: View {
+    let reminder: Reminder
+    @ObservedObject var viewModel: OverlayViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 9) {
+                ZStack {
+                    Circle()
+                        .stroke(Color(red: 0.4, green: 0.65, blue: 0.95).opacity(0.2), lineWidth: 0.75)
+                    Image(systemName: "bell")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(red: 0.4, green: 0.65, blue: 0.95))
+                }
+                .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(reminder.text)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(viewModel.isDarkMode ? .white : .black)
+                    Text(reminder.isCompleted ? "COMPLETED" : "PENDING")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(reminder.isCompleted ? .green : Color(red: 0.4, green: 0.65, blue: 0.95))
+                        .tracking(0.5)
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 3)
+
+            VStack(alignment: .leading, spacing: 7) {
+                DetailInfoRow(label: "Due Date", value: formatDateTime(reminder.dueDate), isDarkMode: viewModel.isDarkMode)
+                DetailInfoRow(label: "Status", value: reminder.isCompleted ? "Completed" : "Pending", isDarkMode: viewModel.isDarkMode)
+                DetailInfoRow(label: "Created", value: formatDate(reminder.createdAt), isDarkMode: viewModel.isDarkMode)
+            }
+
+            if !reminder.tags.isEmpty {
+                Divider()
+                    .padding(.vertical, 3)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("TAGS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .tracking(0.5)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(reminder.tags, id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color(red: 0.85, green: 0.65, blue: 0.75),
+                                            Color(red: 0.88, green: 0.70, blue: 0.78),
+                                            Color(red: 0.82, green: 0.62, blue: 0.72)
+                                        ]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .cornerRadius(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LinearGradient(
+                    gradient: Gradient(colors: viewModel.isDarkMode ? [
+                        Color(red: 0.20, green: 0.20, blue: 0.21),
+                        Color(red: 0.23, green: 0.22, blue: 0.24)
+                    ] : [
+                        Color(red: 0.96, green: 0.98, blue: 1.0),
+                        Color(red: 0.97, green: 0.995, blue: 1.0)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.gray.opacity(viewModel.isDarkMode ? 0.2 : 0.1), lineWidth: 0.5))
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
+    }
+
+    private func formatDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+struct MeetingDetailContent: View {
+    let meeting: Meeting
+    @ObservedObject var viewModel: OverlayViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .stroke(Color(red: 1.0, green: 0.65, blue: 0.3).opacity(0.2), lineWidth: 1)
+                    Image(systemName: "calendar")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(red: 1.0, green: 0.65, blue: 0.3))
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(meeting.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(viewModel.isDarkMode ? .white : .black)
+                    Text("\(meeting.duration) min")
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundColor(.gray)
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                DetailInfoRow(label: "Start Time", value: formatDateTime(meeting.startTime), isDarkMode: viewModel.isDarkMode)
+                DetailInfoRow(label: "Duration", value: "\(meeting.duration) minutes", isDarkMode: viewModel.isDarkMode)
+                DetailInfoRow(label: "Created", value: formatDate(meeting.createdAt), isDarkMode: viewModel.isDarkMode)
+            }
+
+            if !meeting.participants.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("PARTICIPANTS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .tracking(0.5)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(meeting.participants, id: \.self) { participant in
+                            HStack(spacing: 8) {
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(participant)
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.92, green: 0.72, blue: 0.62),
+                                        Color(red: 0.94, green: 0.76, blue: 0.68),
+                                        Color(red: 0.90, green: 0.70, blue: 0.60)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+
+            if !meeting.tags.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("TAGS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .tracking(0.5)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(meeting.tags, id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color(red: 0.92, green: 0.72, blue: 0.62),
+                                            Color(red: 0.94, green: 0.76, blue: 0.68),
+                                            Color(red: 0.90, green: 0.70, blue: 0.60)
+                                        ]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .cornerRadius(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LinearGradient(
+                    gradient: Gradient(colors: viewModel.isDarkMode ? [
+                        Color(red: 0.20, green: 0.20, blue: 0.21),
+                        Color(red: 0.23, green: 0.22, blue: 0.24)
+                    ] : [
+                        Color(red: 1.0, green: 0.97, blue: 0.94),
+                        Color(red: 1.0, green: 0.985, blue: 0.97)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.gray.opacity(viewModel.isDarkMode ? 0.2 : 0.1), lineWidth: 0.5))
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
+    }
+
+    private func formatDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+struct DetailInfoRow: View {
+    let label: String
+    let value: String
+    var isDarkMode: Bool = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(isDarkMode ? Color.gray.opacity(0.6) : .gray)
+                .frame(width: 80, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 12, weight: .regular))
+                .foregroundColor(isDarkMode ? .white : .black)
+                .lineLimit(2)
+
+            Spacer()
+        }
+    }
+}
+
+#Preview {
+    DetailView(viewModel: OverlayViewModel())
+}
