@@ -198,6 +198,10 @@ struct DetailView: View {
 struct NoteDetailContent: View {
     let note: Note
     @ObservedObject var viewModel: OverlayViewModel
+    @State private var showingLinkPicker = false
+
+    var linkedNotes: [Note] { viewModel.linkedNotes(for: note) }
+    var backlinks: [Note]   { viewModel.backlinks(for: note) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -260,6 +264,66 @@ struct NoteDetailContent: View {
                     }
                 }
             }
+
+            // MARK: Linked Notes
+            Divider()
+                .padding(.vertical, 3)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("LINKED NOTES")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .tracking(0.5)
+                    Spacer()
+                    Button(action: { showingLinkPicker = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Link")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.jottGreen)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.jottGreen.opacity(0.1))
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if linkedNotes.isEmpty && backlinks.isEmpty {
+                    Text("No linked notes yet")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                } else {
+                    // Forward links
+                    ForEach(linkedNotes) { linked in
+                        LinkedNoteChip(
+                            note: linked,
+                            isDarkMode: viewModel.isDarkMode,
+                            onTap: { viewModel.selectedNote = linked },
+                            onRemove: { viewModel.unlinkNote(note.id, from: linked.id) }
+                        )
+                    }
+                    // Backlinks (read-only — other notes that point here)
+                    if !backlinks.isEmpty {
+                        Text("BACKLINKS")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                            .padding(.top, 4)
+                        ForEach(backlinks) { bl in
+                            LinkedNoteChip(
+                                note: bl,
+                                isDarkMode: viewModel.isDarkMode,
+                                onTap: { viewModel.selectedNote = bl },
+                                onRemove: nil
+                            )
+                        }
+                    }
+                }
+            }
         }
         .padding(14)
         .background(
@@ -277,6 +341,13 @@ struct NoteDetailContent: View {
                 ))
         )
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.gray.opacity(viewModel.isDarkMode ? 0.2 : 0.1), lineWidth: 0.5))
+        .sheet(isPresented: $showingLinkPicker) {
+            NoteLinkPickerView(
+                viewModel: viewModel,
+                sourceNoteId: note.id,
+                alreadyLinked: note.linkedNoteIds
+            )
+        }
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -284,6 +355,50 @@ struct NoteDetailContent: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+struct LinkedNoteChip: View {
+    let note: Note
+    let isDarkMode: Bool
+    let onTap: () -> Void
+    let onRemove: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onTap) {
+                HStack(spacing: 6) {
+                    Image(systemName: "link")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.jottGreen)
+                    Text(note.text.components(separatedBy: "\n").first ?? note.text)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundColor(isDarkMode ? .white : .black)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.jottGreen.opacity(0.25), lineWidth: 0.5)
+        )
     }
 }
 
@@ -321,6 +436,31 @@ struct ReminderDetailContent: View {
                 DetailInfoRow(label: "Due Date", value: formatDateTime(reminder.dueDate), isDarkMode: viewModel.isDarkMode)
                 DetailInfoRow(label: "Status", value: reminder.isCompleted ? "Completed" : "Pending", isDarkMode: viewModel.isDarkMode)
                 DetailInfoRow(label: "Created", value: formatDate(reminder.createdAt), isDarkMode: viewModel.isDarkMode)
+            }
+
+            // Snooze — only shown for pending, non-overdue intent (always show for pending)
+            if !reminder.isCompleted {
+                Divider()
+                    .padding(.vertical, 3)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("SNOOZE")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .tracking(0.5)
+
+                    HStack(spacing: 8) {
+                        SnoozeButton(label: "30 min") {
+                            viewModel.snoozeReminder(reminder, minutes: 30)
+                        }
+                        SnoozeButton(label: "1 hour") {
+                            viewModel.snoozeReminder(reminder, minutes: 60)
+                        }
+                        SnoozeButton(label: "Tomorrow 9am") {
+                            viewModel.snoozeReminderToTomorrow(reminder)
+                        }
+                    }
+                }
             }
 
             if !reminder.tags.isEmpty {
@@ -528,6 +668,24 @@ struct MeetingDetailContent: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+struct SnoozeButton: View {
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color(red: 0.4, green: 0.65, blue: 0.95))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color(red: 0.4, green: 0.65, blue: 0.95).opacity(0.1))
+                .cornerRadius(5)
+        }
+        .buttonStyle(.plain)
     }
 }
 

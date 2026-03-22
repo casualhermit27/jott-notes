@@ -78,4 +78,10 @@ class OverlayWindowController {
 
     func toggle() { viewModel.toggle() }
     func toggleDarkMode() { viewModel.toggleDarkMode() }
+
+    /// Opens the overlay with a specific note already selected (from menubar recent notes).
+    func openNote(_ note: Note) {
+        viewModel.show()
+        viewModel.selectedNote = note
+    }
 }

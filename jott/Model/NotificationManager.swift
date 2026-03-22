@@ -29,4 +29,18 @@ final class NotificationManager {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: [id.uuidString])
     }
+
+    func snoozeReminder(_ reminder: Reminder, until date: Date) {
+        cancelReminder(reminder.id)
+        let content = UNMutableNotificationContent()
+        content.title = "Jott Reminder"
+        content.body = reminder.text
+        content.sound = .default
+        let comps = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute], from: date)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let req = UNNotificationRequest(
+            identifier: reminder.id.uuidString, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(req)
+    }
 }

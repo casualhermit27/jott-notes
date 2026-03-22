@@ -167,10 +167,12 @@ final class NoteStore {
 
     private func writeNoteMD(_ note: Note) {
         let iso = ISO8601DateFormatter()
+        let linksStr = note.linkedNoteIds.map { $0.uuidString }.joined(separator: ", ")
         let fm = """
         ---
         id: \(note.id.uuidString)
         tags: \(note.tags.joined(separator: ", "))
+        links: \(linksStr)
         created: \(iso.string(from: note.timestamp))
         modified: \(iso.string(from: note.modifiedAt))
         ---
@@ -201,7 +203,7 @@ final class NoteStore {
         let body = parts.dropFirst().joined(separator: "\n---\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        var idStr: String?; var tagsStr = ""; var createdStr: String?; var modStr: String?
+        var idStr: String?; var tagsStr = ""; var linksStr = ""; var createdStr: String?; var modStr: String?
         for line in frontmatter.components(separatedBy: "\n") {
             let kv = line.split(separator: ":", maxSplits: 1)
                 .map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -209,6 +211,7 @@ final class NoteStore {
             switch kv[0] {
             case "id":       idStr      = kv[1]
             case "tags":     tagsStr    = kv[1]
+            case "links":    linksStr   = kv[1]
             case "created":  createdStr = kv[1]
             case "modified": modStr     = kv[1]
             default: break
@@ -218,6 +221,9 @@ final class NoteStore {
         guard let idStr, let id = UUID(uuidString: idStr) else { return nil }
         let tags    = tagsStr.isEmpty ? [] : tagsStr.components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let linkedIds = linksStr.isEmpty ? [] : linksStr.components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .compactMap { UUID(uuidString: $0) }
         let created  = createdStr.flatMap  { iso.date(from: $0) } ?? Date()
         let modified = modStr.flatMap      { iso.date(from: $0) } ?? created
 
@@ -225,7 +231,8 @@ final class NoteStore {
         noteFilenames[id] = url.lastPathComponent
 
         return Note(id: id, text: body, tags: tags,
-                    timestamp: created, modifiedAt: modified, fileURL: url)
+                    timestamp: created, modifiedAt: modified, fileURL: url,
+                    linkedNoteIds: linkedIds)
     }
 
     private func loadNotes() {
@@ -358,6 +365,36 @@ final class NoteStore {
     func deleteReminder(_ id: UUID) {
         reminders.removeAll { $0.id == id }
         persistReminders()
+    }
+
+    func snoozeReminder(_ id: UUID, until date: Date) {
+        guard let idx = reminders.firstIndex(where: { $0.id == id }) else { return }
+        reminders[idx].dueDate = date
+        persistReminders()
+    }
+
+    // MARK: - Note Linking
+
+    func linkNotes(fromId: UUID, toId: UUID) {
+        guard let idx = notesCache.firstIndex(where: { $0.id == fromId }) else { return }
+        guard !notesCache[idx].linkedNoteIds.contains(toId) else { return }
+        notesCache[idx].linkedNoteIds.append(toId)
+        writeNoteMD(notesCache[idx])
+    }
+
+    func unlinkNotes(fromId: UUID, toId: UUID) {
+        guard let idx = notesCache.firstIndex(where: { $0.id == fromId }) else { return }
+        notesCache[idx].linkedNoteIds.removeAll { $0 == toId }
+        writeNoteMD(notesCache[idx])
+    }
+
+    /// Notes that link TO the given note (backlinks)
+    func backlinks(for id: UUID) -> [Note] {
+        notesCache.filter { $0.linkedNoteIds.contains(id) }
+    }
+
+    func note(for id: UUID) -> Note? {
+        notesCache.first { $0.id == id }
     }
 
     private func persistReminders() {

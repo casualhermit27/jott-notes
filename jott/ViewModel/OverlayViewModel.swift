@@ -200,12 +200,19 @@ final class OverlayViewModel: ObservableObject {
     func show() {
         forcedTypeOverride = nil
         sessionNoteId = nil
-        inputText = ""
         selectedNote = nil
         selectedReminder = nil
         selectedMeeting = nil
         isEditingNote = false
         autoSaveStatus = ""
+        // Clipboard watch: pre-fill if user just copied something
+        if let copied = ClipboardMonitor.shared.consume() {
+            inputText = copied
+            clipboardPrefilled = true
+        } else {
+            inputText = ""
+            clipboardPrefilled = false
+        }
         isVisible = true
     }
 
@@ -273,6 +280,70 @@ final class OverlayViewModel: ObservableObject {
     func toggleDarkMode() {
         isDarkMode.toggle()
         UserDefaults.standard.set(isDarkMode, forKey: "jott_darkMode")
+    }
+
+    // MARK: - Clipboard
+    @Published var clipboardPrefilled: Bool = false
+
+    func clearClipboardPrefill() {
+        inputText = ""
+        clipboardPrefilled = false
+    }
+
+    // MARK: - Snooze
+    func snoozeReminder(_ reminder: Reminder, minutes: Int) {
+        let date = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        store.snoozeReminder(reminder.id, until: date)
+        NotificationManager.shared.snoozeReminder(reminder, until: date)
+        if selectedReminder?.id == reminder.id {
+            var updated = reminder
+            updated.dueDate = date
+            selectedReminder = updated
+        }
+        objectWillChange.send()
+    }
+
+    func snoozeReminderToTomorrow(_ reminder: Reminder) {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.day! += 1
+        comps.hour = 9
+        comps.minute = 0
+        let date = Calendar.current.date(from: comps) ?? Date().addingTimeInterval(86400)
+        store.snoozeReminder(reminder.id, until: date)
+        NotificationManager.shared.snoozeReminder(reminder, until: date)
+        if selectedReminder?.id == reminder.id {
+            var updated = reminder
+            updated.dueDate = date
+            selectedReminder = updated
+        }
+        objectWillChange.send()
+    }
+
+    // MARK: - Note Linking
+    @Published var showingLinkPicker: Bool = false
+
+    func linkNote(_ fromId: UUID, to toId: UUID) {
+        store.linkNotes(fromId: fromId, toId: toId)
+        if selectedNote?.id == fromId {
+            selectedNote = store.note(for: fromId)
+        }
+        objectWillChange.send()
+    }
+
+    func unlinkNote(_ fromId: UUID, from toId: UUID) {
+        store.unlinkNotes(fromId: fromId, toId: toId)
+        if selectedNote?.id == fromId {
+            selectedNote = store.note(for: fromId)
+        }
+        objectWillChange.send()
+    }
+
+    func linkedNotes(for note: Note) -> [Note] {
+        note.linkedNoteIds.compactMap { store.note(for: $0) }
+    }
+
+    func backlinks(for note: Note) -> [Note] {
+        store.backlinks(for: note.id)
     }
 
     // MARK: - Note editing

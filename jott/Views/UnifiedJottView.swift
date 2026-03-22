@@ -237,6 +237,25 @@ struct JottInputArea: View {
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                     }
 
+                    // Clipboard pre-fill indicator
+                    if viewModel.clipboardPrefilled {
+                        Button(action: { viewModel.clearClipboardPrefill() }) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "doc.on.clipboard")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary.opacity(0.55))
+                                Text("from clipboard")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.secondary.opacity(0.4))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.secondary.opacity(0.35))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.scale(scale: 0.5, anchor: .trailing).combined(with: .opacity))
+                    }
+
                     // Saved indicator
                     if viewModel.autoSaveStatus == "saved" {
                         HStack(spacing: 3) {
