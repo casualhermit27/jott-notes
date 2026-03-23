@@ -175,6 +175,7 @@ final class OverlayViewModel: ObservableObject {
         switch parsed {
         case .note(let noteText, let tags):
             store.upsertNote(Note(id: id, text: noteText, tags: tags))
+            resolveWikiLinks(noteId: id, text: noteText)
 
         case .reminder(let reminderText, let dueDate, let tags):
             let reminder = Reminder(text: reminderText, dueDate: dueDate, tags: tags)
@@ -319,7 +320,78 @@ final class OverlayViewModel: ObservableObject {
         objectWillChange.send()
     }
 
-    // MARK: - Note Linking
+    // MARK: - [[ Inline Link Autocomplete
+    @Published var isLinkAutocompleting: Bool = false
+    @Published var linkQuery: String = ""
+    @Published var linkCandidates: [Note] = []
+    @Published var selectedLinkIndex: Int = 0
+    /// Set by selectLinkCandidate; consumed by JottNativeInput.updateNSView to do the text replacement.
+    @Published var pendingLinkCompletionTitle: String? = nil
+
+    func updateLinkQuery(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let all = store.allNotes()
+        linkCandidates = all
+            .filter { note in
+                guard note.id != sessionNoteId else { return false }
+                let title = noteTitleLine(note)
+                if trimmed.isEmpty { return true }
+                return title.lowercased().contains(trimmed.lowercased())
+                    || note.text.lowercased().contains(trimmed.lowercased())
+            }
+            .prefix(6)
+            .map { $0 }
+        linkQuery = query
+        selectedLinkIndex = 0
+        isLinkAutocompleting = true
+    }
+
+    func selectLinkCandidate(_ note: Note) {
+        pendingLinkCompletionTitle = noteTitleLine(note)
+        dismissLinkAutocomplete()
+    }
+
+    func selectCurrentLinkCandidate() {
+        guard !linkCandidates.isEmpty else { return }
+        selectLinkCandidate(linkCandidates[selectedLinkIndex])
+    }
+
+    func moveLinkSelection(by delta: Int) {
+        guard !linkCandidates.isEmpty else { return }
+        selectedLinkIndex = max(0, min(linkCandidates.count - 1, selectedLinkIndex + delta))
+    }
+
+    func dismissLinkAutocomplete() {
+        isLinkAutocompleting = false
+        linkQuery = ""
+        linkCandidates = []
+        selectedLinkIndex = 0
+    }
+
+    private func noteTitleLine(_ note: Note) -> String {
+        note.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? note.text
+    }
+
+    /// Called after saving a note — resolves [[title]] syntax into linkedNoteIds.
+    private func resolveWikiLinks(noteId: UUID, text: String) {
+        guard let expr = try? NSRegularExpression(pattern: "\\[\\[([^\\]]+)\\]\\]") else { return }
+        let ns = text as NSString
+        let matches = expr.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        for m in matches {
+            guard m.numberOfRanges > 1 else { continue }
+            let r = m.range(at: 1)
+            guard r.location != NSNotFound else { continue }
+            let title = ns.substring(with: r)
+            if let target = store.allNotes().first(where: {
+                $0.id != noteId &&
+                ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text) == title
+            }) {
+                store.linkNotes(fromId: noteId, toId: target.id)
+            }
+        }
+    }
+
+    // MARK: - Note Linking (UI picker)
     @Published var showingLinkPicker: Bool = false
 
     func linkNote(_ fromId: UUID, to toId: UUID) {

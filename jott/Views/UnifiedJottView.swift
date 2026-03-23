@@ -64,7 +64,18 @@ struct JottCaptureView: View {
             JottInputArea(viewModel: viewModel)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let cmd = command {
+            if viewModel.isLinkAutocompleting && !viewModel.linkCandidates.isEmpty {
+                Divider()
+                    .opacity(0.12)
+                    .transition(.opacity.animation(.easeOut(duration: 0.08)))
+                NoteLinkAutocompleteView(viewModel: viewModel)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.97, anchor: .top)
+                            .combined(with: .opacity)
+                            .animation(.spring(response: 0.28, dampingFraction: 0.78)),
+                        removal: .opacity.animation(.easeOut(duration: 0.08))
+                    ))
+            } else if let cmd = command {
                 Divider()
                     .opacity(0.12)
                     .transition(.opacity.animation(.easeOut(duration: 0.1)))
@@ -81,10 +92,10 @@ struct JottCaptureView: View {
         .clipped()
         .background(jottBarLight)
         .animation(
-            command != nil
+            (viewModel.isLinkAutocompleting || command != nil)
                 ? .spring(response: 0.36, dampingFraction: 0.82)
                 : .easeOut(duration: 0.18),
-            value: command != nil
+            value: viewModel.isLinkAutocompleting || command != nil
         )
     }
 }
@@ -199,6 +210,8 @@ struct JottInputArea: View {
                 // Text editor — trailing padding reserves room for overlay controls
                 JottNativeInput(
                     text: $viewModel.inputText,
+                    linkCompletion: $viewModel.pendingLinkCompletionTitle,
+                    viewModel: viewModel,
                     placeholder: placeholderText,
                     isDark: viewModel.isDarkMode,
                     isFocused: focused,
@@ -593,6 +606,8 @@ struct JottOpenAction: View {
 
 struct JottNativeInput: NSViewRepresentable {
     @Binding var text: String
+    @Binding var linkCompletion: String?   // set to a note title to trigger [[completion]]
+    let viewModel: OverlayViewModel
     let placeholder: String
     let isDark: Bool
     let isFocused: Bool
@@ -636,6 +651,28 @@ struct JottNativeInput: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let tv = scrollView.documentView as? JottNSTextView else { return }
+
+        // [[ link completion — replace text directly in NSTextView to preserve cursor position
+        if let title = linkCompletion {
+            let cursorPos = tv.selectedRange().location
+            let nsStr = tv.string as NSString
+            let beforeCursor = nsStr.substring(with: NSRange(location: 0, length: cursorPos))
+            let range = (beforeCursor as NSString).range(of: "[[", options: .backwards)
+            if range.location != NSNotFound {
+                let completion = "[[\(title)]]"
+                let replaceRange = NSRange(location: range.location,
+                                          length: cursorPos - range.location)
+                if tv.shouldChangeText(in: replaceRange, replacementString: completion) {
+                    tv.replaceCharacters(in: replaceRange, with: completion)
+                    tv.didChangeText()
+                    let newPos = range.location + (completion as NSString).length
+                    tv.setSelectedRange(NSRange(location: newPos, length: 0))
+                }
+            }
+            DispatchQueue.main.async { linkCompletion = nil }
+            return  // text updated via replaceCharacters → textDidChange will sync binding
+        }
+
         if tv.string != text { tv.string = text }
 
         // Background is always light (#d9d9d9), so text is always dark
@@ -676,9 +713,49 @@ struct JottNativeInput: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
             reportHeight(from: tv)
+            detectLinkTrigger(in: tv)
+        }
+
+        private func detectLinkTrigger(in tv: NSTextView) {
+            let cursorPos = tv.selectedRange().location
+            guard cursorPos > 0 else {
+                if parent.viewModel.isLinkAutocompleting { parent.viewModel.dismissLinkAutocomplete() }
+                return
+            }
+            let beforeCursor = String((tv.string as NSString).substring(with: NSRange(location: 0, length: cursorPos)))
+            if let bracketRange = beforeCursor.range(of: "[[", options: .backwards) {
+                let query = String(beforeCursor[bracketRange.upperBound...])
+                // Only trigger if no closing ]] between [[ and cursor
+                if !query.contains("]]") {
+                    parent.viewModel.updateLinkQuery(query)
+                    return
+                }
+            }
+            if parent.viewModel.isLinkAutocompleting {
+                parent.viewModel.dismissLinkAutocomplete()
+            }
         }
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
+            // Intercept keys for [[ autocomplete
+            if parent.viewModel.isLinkAutocompleting {
+                if sel == #selector(NSResponder.moveDown(_:)) {
+                    parent.viewModel.moveLinkSelection(by: 1)
+                    return true
+                }
+                if sel == #selector(NSResponder.moveUp(_:)) {
+                    parent.viewModel.moveLinkSelection(by: -1)
+                    return true
+                }
+                if sel == #selector(NSResponder.insertNewline(_:)) {
+                    parent.viewModel.selectCurrentLinkCandidate()
+                    return true
+                }
+                if sel == #selector(NSResponder.cancelOperation(_:)) {
+                    parent.viewModel.dismissLinkAutocomplete()
+                    return true
+                }
+            }
             if sel == #selector(NSResponder.cancelOperation(_:)) {
                 parent.onEscape()
                 return true
