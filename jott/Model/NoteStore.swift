@@ -106,7 +106,7 @@ final class NoteStore {
     private func slugify(_ text: String) -> String {
         let lower = text.lowercased()
         // Replace non-alphanumeric characters with hyphens
-        var slug = lower.unicodeScalars.map { scalar -> Character in
+        let slug = lower.unicodeScalars.map { scalar -> Character in
             let c = Character(scalar)
             if c.isLetter || c.isNumber { return c }
             return "-"
@@ -173,6 +173,7 @@ final class NoteStore {
         id: \(note.id.uuidString)
         tags: \(note.tags.joined(separator: ", "))
         links: \(linksStr)
+        pinned: \(note.isPinned)
         created: \(iso.string(from: note.timestamp))
         modified: \(iso.string(from: note.modifiedAt))
         ---
@@ -203,7 +204,7 @@ final class NoteStore {
         let body = parts.dropFirst().joined(separator: "\n---\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        var idStr: String?; var tagsStr = ""; var linksStr = ""; var createdStr: String?; var modStr: String?
+        var idStr: String?; var tagsStr = ""; var linksStr = ""; var createdStr: String?; var modStr: String?; var pinnedStr = "false"
         for line in frontmatter.components(separatedBy: "\n") {
             let kv = line.split(separator: ":", maxSplits: 1)
                 .map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -212,6 +213,7 @@ final class NoteStore {
             case "id":       idStr      = kv[1]
             case "tags":     tagsStr    = kv[1]
             case "links":    linksStr   = kv[1]
+            case "pinned":   pinnedStr  = kv[1]
             case "created":  createdStr = kv[1]
             case "modified": modStr     = kv[1]
             default: break
@@ -230,9 +232,10 @@ final class NoteStore {
         // Register the filename for this UUID
         noteFilenames[id] = url.lastPathComponent
 
+        let isPinned = pinnedStr.lowercased() == "true"
         return Note(id: id, text: body, tags: tags,
                     timestamp: created, modifiedAt: modified, fileURL: url,
-                    linkedNoteIds: linkedIds)
+                    linkedNoteIds: linkedIds, isPinned: isPinned)
     }
 
     private func loadNotes() {
@@ -288,7 +291,16 @@ final class NoteStore {
     }
 
     func allNotes() -> [Note] {
-        notesCache.sorted { $0.modifiedAt > $1.modifiedAt }
+        notesCache.sorted { a, b in
+            if a.isPinned != b.isPinned { return a.isPinned }
+            return a.modifiedAt > b.modifiedAt
+        }
+    }
+
+    func togglePin(_ id: UUID) {
+        guard let idx = notesCache.firstIndex(where: { $0.id == id }) else { return }
+        notesCache[idx].isPinned.toggle()
+        writeNoteMD(notesCache[idx])
     }
 
     func searchNotes(query: String) -> [Note] {

@@ -108,7 +108,7 @@ struct NaturalLanguageParser {
         return .meeting(title: title, participants: participants, startTime: startTime, tags: tags)
     }
 
-    private static func extractDate(from text: String) -> Date? {
+    static func extractDate(from text: String) -> Date? {
         let lowercased = text.lowercased()
         let now = Date()
         let calendar = Calendar.current
@@ -147,7 +147,7 @@ struct NaturalLanguageParser {
         return nil
     }
 
-    private static func extractTime(from text: String, baseDate: Date) -> Date? {
+    static func extractTime(from text: String, baseDate: Date) -> Date? {
         let calendar = Calendar.current
         let timePattern = "(\\d{1,2})(?::?(\\d{2}))?\\s*(am|pm|AM|PM)?"
         let regex = try? NSRegularExpression(pattern: timePattern, options: [])
@@ -160,8 +160,8 @@ struct NaturalLanguageParser {
         let minuteRange = match.range(at: 2)
         let meridianRange = match.range(at: 3)
 
-        guard let hourText = nsText.substring(with: hourRange) as? String,
-              var hour = Int(hourText) else { return nil }
+        let hourText = nsText.substring(with: hourRange)
+        guard var hour = Int(hourText) else { return nil }
 
         let minute = minuteRange.length > 0 ? Int(nsText.substring(with: minuteRange)) ?? 0 : 0
         let meridian = meridianRange.length > 0 ? nsText.substring(with: meridianRange).lowercased() : nil
@@ -199,20 +199,126 @@ struct NaturalLanguageParser {
         return tags
     }
 
-    private static func removeDateReferences(from text: String) -> String {
+    static func removeDateReferences(from text: String) -> String {
         var result = text
         let datePatterns = [
             "\\btomorrow\\b",
             "\\btoday\\b",
             "\\bmonday\\b", "\\btuesday\\b", "\\bwednesday\\b", "\\bthursday\\b", "\\bfriday\\b", "\\bsaturday\\b", "\\bsunday\\b",
             "\\bnext week\\b",
+            // Absolute dates: "april 1 2026", "1 april 2026", "april 1", "1 april"
+            "\\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\\s+\\d{1,2}(?:\\s+\\d{4})?\\b",
+            "\\b\\d{1,2}\\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)(?:\\s+\\d{4})?\\b",
             "\\d{1,2}(?::?\\d{2})?\\s*(?:am|pm|AM|PM)"
         ]
 
         for pattern in datePatterns {
-            result = result.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+            result = result.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
         }
 
         return result
+    }
+
+    /// Parses "april 1", "1 april", "april 1 2026", "1 april 2026" into a Date.
+    private static func extractAbsoluteDate(from lowercased: String) -> Date? {
+        let months = ["january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
+                      "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
+                      "jan":1,"feb":2,"mar":3,"apr":4,"jun":6,"jul":7,"aug":8,
+                      "sep":9,"sept":9,"oct":10,"nov":11,"dec":12]
+
+        // Pattern: "month day [year]"
+        let pat1 = #"(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{1,2})(?:\s+(\d{4}))?"#
+        // Pattern: "day month [year]"
+        let pat2 = #"(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)(?:\s+(\d{4}))?"#
+
+        var month: Int?; var day: Int?; var year: Int?
+
+        if let regex = try? NSRegularExpression(pattern: pat1, options: .caseInsensitive),
+           let m = regex.firstMatch(in: lowercased, range: NSRange(lowercased.startIndex..., in: lowercased)) {
+            let ns = lowercased as NSString
+            month = months[ns.substring(with: m.range(at: 1))]
+            day   = Int(ns.substring(with: m.range(at: 2)))
+            if m.range(at: 3).length > 0 { year = Int(ns.substring(with: m.range(at: 3))) }
+        } else if let regex = try? NSRegularExpression(pattern: pat2, options: .caseInsensitive),
+                  let m = regex.firstMatch(in: lowercased, range: NSRange(lowercased.startIndex..., in: lowercased)) {
+            let ns = lowercased as NSString
+            day   = Int(ns.substring(with: m.range(at: 1)))
+            month = months[ns.substring(with: m.range(at: 2))]
+            if m.range(at: 3).length > 0 { year = Int(ns.substring(with: m.range(at: 3))) }
+        }
+
+        guard let m = month, let d = day else { return nil }
+        let cal = Calendar.current
+        let now = Date()
+        var comps = DateComponents()
+        comps.month = m; comps.day = d
+        comps.year = year ?? cal.component(.year, from: now)
+        // If no year specified and date is in the past, bump to next year
+        if year == nil, let candidate = cal.date(from: comps), candidate < now {
+            comps.year = comps.year! + 1
+        }
+        return cal.date(from: comps)
+    }
+
+    /// Parses plain event text ("Team lunch tomorrow at 3pm") into title + date.
+    /// Combines day keyword + time so "tomorrow at 3pm" = day+1 at 3pm.
+    static func parseForEvent(from text: String) -> (title: String, date: Date, hasExplicitDate: Bool) {
+        let cal = Calendar.current
+        let now = Date()
+        var dayBase = now
+        var foundDay = false
+        var hasExplicit = false
+
+        let low = text.lowercased()
+
+        if low.contains("tomorrow") {
+            dayBase = cal.date(byAdding: .day, value: 1, to: now) ?? now
+            foundDay = true; hasExplicit = true
+        } else if low.contains("today") {
+            dayBase = now
+            foundDay = true; hasExplicit = true
+        } else if low.contains("next week") {
+            dayBase = cal.date(byAdding: .weekOfYear, value: 1, to: now) ?? now
+            foundDay = true; hasExplicit = true
+        } else if let absDate = extractAbsoluteDate(from: low) {
+            dayBase = absDate; foundDay = true; hasExplicit = true
+        } else {
+            let daysOfWeek: [(String, Int)] = [
+                ("monday",2),("tuesday",3),("wednesday",4),("thursday",5),
+                ("friday",6),("saturday",7),("sunday",1)
+            ]
+            for (name, num) in daysOfWeek where low.contains(name) {
+                let current = cal.component(.weekday, from: now)
+                let ahead = (num - current + 7) % 7
+                dayBase = cal.date(byAdding: .day, value: ahead == 0 ? 7 : ahead, to: now) ?? now
+                foundDay = true; hasExplicit = true
+                break
+            }
+        }
+
+        var dayComps = cal.dateComponents([.year, .month, .day], from: dayBase)
+        var date: Date
+        if let timeDate = extractTime(from: text, baseDate: dayBase) {
+            let timeComps = cal.dateComponents([.hour, .minute], from: timeDate)
+            dayComps.hour = timeComps.hour
+            dayComps.minute = timeComps.minute
+            date = cal.date(from: dayComps) ?? dayBase
+            hasExplicit = true
+        } else if foundDay {
+            dayComps.hour = 9; dayComps.minute = 0
+            date = cal.date(from: dayComps) ?? dayBase
+        } else {
+            date = now.addingTimeInterval(3600)
+        }
+
+        var title = removeDateReferences(from: text)
+        title = title.replacingOccurrences(of: #"\bat\b"#, with: "", options: .regularExpression)
+        title = title.replacingOccurrences(of: #"\bon\b"#, with: "", options: .regularExpression)
+        title = title.replacingOccurrences(of: #"#\w+"#,  with: "", options: .regularExpression)
+        title = title.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.joined(separator: " ")
+        title = title.trimmingCharacters(in: .whitespaces)
+        if title.isEmpty { title = text.trimmingCharacters(in: .whitespaces) }
+
+        return (title: title, date: date, hasExplicitDate: hasExplicit)
     }
 }

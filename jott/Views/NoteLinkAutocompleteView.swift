@@ -9,6 +9,13 @@ struct NoteLinkAutocompleteView: View {
             ForEach(Array(viewModel.linkCandidates.enumerated()), id: \.element.id) { idx, note in
                 Button(action: { viewModel.selectLinkCandidate(note) }) {
                     HStack(spacing: 10) {
+                        if idx == viewModel.selectedLinkIndex {
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(Color.jottGreen.opacity(0.8))
+                                .frame(width: 3, height: 18)
+                        } else {
+                            Color.clear.frame(width: 3, height: 18)
+                        }
                         Image(systemName: "link")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.jottGreen.opacity(0.75))
@@ -46,6 +53,7 @@ struct NoteLinkAutocompleteView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .transition(.move(edge: .top).combined(with: .opacity))
 
                 if idx < viewModel.linkCandidates.count - 1 {
                     Divider()
@@ -76,6 +84,7 @@ struct NoteLinkAutocompleteView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .animation(.easeOut(duration: 0.08), value: viewModel.selectedLinkIndex)
+        .animation(.spring(response: 0.18, dampingFraction: 0.88), value: viewModel.linkCandidates.map(\.id))
     }
 
     private func titleLine(_ note: Note) -> String {

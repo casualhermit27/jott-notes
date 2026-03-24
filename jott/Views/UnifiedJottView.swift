@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import EventKit
 
 // MARK: - Root View
@@ -32,7 +33,6 @@ struct UnifiedJottView: View {
                         ))
                 }
             }
-            .shadow(color: .black.opacity(0.22), radius: 28, x: 0, y: 10)
             .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showDetail)
 
             Spacer() // transparent — fills the rest of the 420px panel
@@ -48,6 +48,9 @@ private let jottBarLight   = Color(red: 0.851, green: 0.851, blue: 0.851)  // #d
 private let jottBarDark    = Color(red: 0.13,  green: 0.13,  blue: 0.14)
 private let jottCursorColor = NSColor(red: 0.447, green: 0.420, blue: 1.0, alpha: 1) // #726bff
 private let jottPlaceholder = NSColor(red: 0.616, green: 0.616, blue: 0.616, alpha: 1) // #9d9d9d
+private let jottLinkHighlightText = NSColor(red: 0.36, green: 0.33, blue: 0.95, alpha: 1)
+private let jottLinkHighlightBg = NSColor(red: 0.45, green: 0.42, blue: 1.0, alpha: 0.16)
+private let jottLinkUnderline = NSColor(red: 0.36, green: 0.33, blue: 0.95, alpha: 0.35)
 
 // MARK: - Capture View
 
@@ -56,7 +59,12 @@ struct JottCaptureView: View {
 
     var command: JottCommand? {
         guard !viewModel.isForcedCreationMode else { return nil }
-        return JottCommand(input: viewModel.inputText)
+        return viewModel.currentCommand
+    }
+
+    var showingCreationPreview: Bool {
+        guard viewModel.commandMode != nil, !viewModel.inputText.isEmpty else { return false }
+        return viewModel.commandCreationPreview() != nil
     }
 
     var body: some View {
@@ -79,14 +87,28 @@ struct JottCaptureView: View {
                 Divider()
                     .opacity(0.12)
                     .transition(.opacity.animation(.easeOut(duration: 0.1)))
-                JottCommandResults(command: cmd, viewModel: viewModel)
-                    .frame(height: 300)
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 0.97, anchor: .top)
-                            .combined(with: .opacity)
-                            .animation(.spring(response: 0.36, dampingFraction: 0.78).delay(0.05)),
-                        removal: .opacity.animation(.easeOut(duration: 0.1))
-                    ))
+                if viewModel.commandMode == nil {
+                    JottCommandSuggestionBar(viewModel: viewModel)
+                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                    Divider().opacity(0.07)
+                }
+                if showingCreationPreview {
+                    ItemCreationPreviewCard(viewModel: viewModel)
+                        .frame(height: 260)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeIn(duration: 0.12)),
+                            removal:   .opacity.animation(.easeOut(duration: 0.08))
+                        ))
+                } else {
+                    JottCommandResults(command: cmd, viewModel: viewModel)
+                        .frame(height: 260)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.97, anchor: .top)
+                                .combined(with: .opacity)
+                                .animation(.spring(response: 0.36, dampingFraction: 0.78).delay(0.05)),
+                            removal: .opacity.animation(.easeOut(duration: 0.1))
+                        ))
+                }
             }
         }
         .clipped()
@@ -119,13 +141,13 @@ enum JottCommand: Equatable {
             self = .notes(query: q)
         } else if trimmed == "open" {
             self = .open
-        } else if trimmed == "calendar" || trimmed.hasPrefix("calendar") {
+        } else if trimmed.hasPrefix("calendar") || trimmed.hasPrefix("calender") || trimmed == "cal" || trimmed == "c" {
             self = .calendar
-        } else if trimmed.hasPrefix("reminder") {
-            let q = String(raw.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+        } else if trimmed.hasPrefix("reminder") || trimmed == "r" || trimmed == "rem" {
+            let q = String(raw.dropFirst(trimmed.hasPrefix("reminder") ? 8 : 0)).trimmingCharacters(in: .whitespaces)
             self = .reminders(query: q)
-        } else if trimmed.hasPrefix("meeting") {
-            let q = String(raw.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+        } else if trimmed.hasPrefix("meeting") || trimmed == "m" || trimmed == "meet" {
+            let q = String(raw.dropFirst(trimmed.hasPrefix("meeting") ? 7 : 0)).trimmingCharacters(in: .whitespaces)
             self = .meetings(query: q)
         } else if trimmed.hasPrefix("search ") {
             self = .search(query: String(raw.dropFirst(7)).trimmingCharacters(in: .whitespaces))
@@ -181,8 +203,42 @@ struct JottInputArea: View {
         if let forced = viewModel.forcedType {
             return badgeInfo(for: forced, forced: true)
         }
+        if let mode = viewModel.commandMode {
+            return badgeInfoForCommand(mode)
+        }
+        if viewModel.inputText.hasPrefix("/"), !viewModel.isForcedCreationMode {
+            return commandBadge
+        }
         guard !viewModel.inputText.isEmpty, !viewModel.inputText.hasPrefix("/") else { return nil }
         return badgeInfo(for: viewModel.detectedType, forced: false)
+    }
+
+    private func badgeInfoForCommand(_ cmd: JottCommand) -> TypeBadgeInfo {
+        switch cmd {
+        case .calendar:
+            return TypeBadgeInfo(label: "Calendar", bg: Color(red: 0.78, green: 0.88, blue: 0.99),
+                                 fg: Color(red: 0.10, green: 0.35, blue: 0.72), icon: "calendar")
+        case .reminders:
+            return TypeBadgeInfo(label: "Reminders", bg: Color(red: 0.83, green: 0.85, blue: 0.98),
+                                 fg: Color(red: 0.20, green: 0.24, blue: 0.74), icon: "bell")
+        case .meetings:
+            return TypeBadgeInfo(label: "Meetings", bg: Color(red: 0.99, green: 0.90, blue: 0.78),
+                                 fg: Color(red: 0.62, green: 0.30, blue: 0.06), icon: "person.2")
+        case .notes:
+            return TypeBadgeInfo(label: "Notes", bg: Color(red: 0.80, green: 0.95, blue: 0.86),
+                                 fg: Color(red: 0.10, green: 0.44, blue: 0.24), icon: "note.text")
+        case .open:
+            return TypeBadgeInfo(label: "Open", bg: Color(red: 0.92, green: 0.92, blue: 0.95),
+                                 fg: Color(red: 0.30, green: 0.30, blue: 0.42), icon: "folder")
+        case .search:
+            return TypeBadgeInfo(label: "Search", bg: Color(red: 0.92, green: 0.92, blue: 0.95),
+                                 fg: Color(red: 0.30, green: 0.30, blue: 0.42), icon: "magnifyingglass")
+        }
+    }
+
+    private var commandBadge: TypeBadgeInfo? {
+        guard let cmd = JottCommand(input: viewModel.inputText) else { return nil }
+        return badgeInfoForCommand(cmd)
     }
 
     var body: some View {
@@ -227,7 +283,7 @@ struct JottInputArea: View {
                 .padding(.trailing, 32) // reserve space for overlay controls
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+            .padding(.vertical, 18)
             // Trailing controls as overlay — never affect row height
             .overlay(alignment: .trailing) {
                 VStack(alignment: .trailing, spacing: 4) {
@@ -248,6 +304,26 @@ struct JottInputArea: View {
                         }
                         .buttonStyle(.plain)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    }
+
+                    // Active tag filter indicator
+                    if let tag = viewModel.activeTagFilter {
+                        Button(action: { viewModel.setTagFilter(nil) }) {
+                            HStack(spacing: 3) {
+                                Text("#\(tag)")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.35, green: 0.72, blue: 0.50))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.secondary.opacity(0.4))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(red: 0.35, green: 0.72, blue: 0.50).opacity(0.1))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.scale(scale: 0.5, anchor: .trailing).combined(with: .opacity))
                     }
 
                     // Clipboard pre-fill indicator
@@ -306,6 +382,15 @@ struct JottInputArea: View {
             case .meeting:  return "meeting title, with who..."
             }
         }
+        if let mode = viewModel.commandMode {
+            switch mode {
+            case .calendar:  return "event title, tomorrow at 3pm..."
+            case .meetings:  return "meeting title, friday 2pm..."
+            case .reminders: return "remind me to... by when?"
+            case .notes:     return "search notes..."
+            default:         return ""
+            }
+        }
         return viewModel.inputText.hasPrefix("/") ? "" : "jott something down..."
     }
 }
@@ -317,25 +402,19 @@ struct GradientTypeBadge: View {
     @State private var appeared = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: info.icon)
-                .font(.system(size: 12, weight: .medium))
-            Text(info.label)
-                .font(.system(size: 13, weight: .semibold))
-                .tracking(0.1)
-        }
-        .foregroundColor(info.fg)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(info.bg)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .scaleEffect(appeared ? 1.0 : 0.5)
-        .opacity(appeared ? 1.0 : 0)
-        .onAppear {
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.58)) {
-                appeared = true
+        Image(systemName: info.icon)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(info.fg)
+            .frame(width: 22, height: 22)
+            .background(info.bg)
+            .clipShape(Circle())
+            .scaleEffect(appeared ? 1.0 : 0.4)
+            .opacity(appeared ? 1.0 : 0)
+            .onAppear {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    appeared = true
+                }
             }
-        }
     }
 }
 
@@ -345,28 +424,7 @@ struct JottCommandResults: View {
     let command: JottCommand
     @ObservedObject var viewModel: OverlayViewModel
 
-    var items: [TimelineItem] {
-        switch command {
-        case .notes(let q):
-            let notes = q.isEmpty ? viewModel.getAllNotes() : viewModel.searchNotes(q)
-            return notes.map { .note($0) }
-        case .reminders(let q):
-            let all = viewModel.getAllReminders()
-            if q.isEmpty { return all.map { .reminder($0) } }
-            return all.filter { $0.text.lowercased().contains(q.lowercased()) }.map { .reminder($0) }
-        case .meetings(let q):
-            let all = viewModel.getAllMeetings()
-            if q.isEmpty { return all.map { .meeting($0) } }
-            return all.filter { $0.title.lowercased().contains(q.lowercased()) }.map { .meeting($0) }
-        case .search(let q):
-            guard !q.isEmpty else { return [] }
-            return viewModel.searchNotes(q).map { .note($0) }
-        case .open:
-            return []
-        case .calendar:
-            return []  // handled separately in body
-        }
-    }
+    var items: [TimelineItem] { viewModel.commandItems(for: command) }
 
     var label: String {
         switch command {
@@ -408,8 +466,8 @@ struct JottCommandResults: View {
                 } else {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 0) {
-                            ForEach(items, id: \.id) { item in
-                                JottRow(item: item, viewModel: viewModel)
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                JottRow(item: item, viewModel: viewModel, isSelected: index == viewModel.selectedCommandIndex)
                                     .transition(.asymmetric(
                                         insertion: .push(from: .bottom).combined(with: .opacity),
                                         removal: .move(edge: .leading).combined(with: .opacity)
@@ -420,6 +478,155 @@ struct JottCommandResults: View {
                         .animation(.spring(response: 0.34, dampingFraction: 0.8), value: items.map(\.id))
                     }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Command Suggestion Bar
+
+struct CommandChip {
+    let label: String
+    let shorthand: String
+    let icon: String
+    let insert: String
+}
+
+let allCommandChips: [CommandChip] = [
+    CommandChip(label: "Calendar",  shorthand: "/c",    icon: "calendar",           insert: "/calendar"),
+    CommandChip(label: "Notes",     shorthand: "/n",    icon: "note.text",           insert: "/notes"),
+    CommandChip(label: "Reminders", shorthand: "/r",    icon: "bell",               insert: "/reminders"),
+    CommandChip(label: "Meetings",  shorthand: "/m",    icon: "person.2",           insert: "/meetings"),
+    CommandChip(label: "Search",    shorthand: "/s",    icon: "magnifyingglass",    insert: "/search "),
+    CommandChip(label: "Open",      shorthand: "/open", icon: "folder",             insert: "/open"),
+]
+
+struct JottCommandSuggestionBar: View {
+    @ObservedObject var viewModel: OverlayViewModel
+
+    private var chips: [CommandChip] {
+        let query = viewModel.inputText.lowercased().dropFirst()   // drop "/"
+        if query.isEmpty { return allCommandChips }
+        return allCommandChips.filter {
+            $0.label.lowercased().hasPrefix(query) ||
+            String($0.shorthand.dropFirst()).hasPrefix(query) ||
+            String($0.insert.dropFirst()).hasPrefix(query)
+        }
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(chips, id: \.insert) { chip in
+                    Button {
+                        if let cmd = JottCommand(input: chip.insert) {
+                            viewModel.activateCommandMode(cmd)
+                            viewModel.inputText = ""
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: chip.icon)
+                                .font(.system(size: 10, weight: .medium))
+                            Text(chip.label)
+                                .font(.system(size: 11, weight: .medium))
+                            Text(chip.shorthand)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary.opacity(0.45))
+                        }
+                        .foregroundColor(.secondary.opacity(0.65))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.secondary.opacity(0.07))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+        }
+    }
+}
+
+// MARK: - Item Creation Preview Card
+
+struct ItemCreationPreviewCard: View {
+    @ObservedObject var viewModel: OverlayViewModel
+
+    private func formattedDate(_ date: Date, hasDate: Bool) -> String {
+        let cal = Calendar.current
+        let df = DateFormatter()
+        let day: String
+        if cal.isDateInToday(date)     { day = "Today" }
+        else if cal.isDateInTomorrow(date) { day = "Tomorrow" }
+        else { df.dateFormat = "EEEE, MMM d"; day = df.string(from: date) }
+        df.dateFormat = "h:mm a"
+        return "\(day) · \(df.string(from: date))"
+    }
+
+    var body: some View {
+        if let p = viewModel.commandCreationPreview() {
+            let (iconName, accentColor): (String, Color) = {
+                switch viewModel.commandMode {
+                case .calendar:
+                    return ("calendar.badge.plus", Color(red: 0.10, green: 0.35, blue: 0.72))
+                case .meetings:
+                    return ("person.2.fill", Color(red: 0.62, green: 0.30, blue: 0.06))
+                case .reminders:
+                    return ("bell.fill", Color(red: 0.20, green: 0.24, blue: 0.74))
+                default:
+                    return ("plus.circle", .secondary)
+                }
+            }()
+
+            VStack(spacing: 0) {
+                Spacer()
+                VStack(spacing: 10) {
+                    HStack(spacing: 14) {
+                        Image(systemName: iconName)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(accentColor)
+                            .frame(width: 32, height: 32)
+                            .background(accentColor.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(p.title)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.10, green: 0.10, blue: 0.12))
+                                .lineLimit(2)
+                            Text(formattedDate(p.date, hasDate: p.hasDate))
+                                .font(.system(size: 12))
+                                .foregroundColor(p.hasDate
+                                    ? accentColor.opacity(0.75)
+                                    : Color.secondary.opacity(0.4))
+                        }
+                        Spacer()
+                    }
+                    .padding(16)
+                    .background(accentColor.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(accentColor.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 20)
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "return")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary.opacity(0.35))
+                        Text("to create")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary.opacity(0.4))
+                        Text("·")
+                            .foregroundColor(.secondary.opacity(0.25))
+                        Text("esc to clear")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary.opacity(0.3))
+                    }
+                }
+                Spacer()
             }
         }
     }
@@ -651,27 +858,8 @@ struct JottNativeInput: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let tv = scrollView.documentView as? JottNSTextView else { return }
-
-        // [[ link completion — replace text directly in NSTextView to preserve cursor position
-        if let title = linkCompletion {
-            let cursorPos = tv.selectedRange().location
-            let nsStr = tv.string as NSString
-            let beforeCursor = nsStr.substring(with: NSRange(location: 0, length: cursorPos))
-            let range = (beforeCursor as NSString).range(of: "[[", options: .backwards)
-            if range.location != NSNotFound {
-                let completion = "[[\(title)]]"
-                let replaceRange = NSRange(location: range.location,
-                                          length: cursorPos - range.location)
-                if tv.shouldChangeText(in: replaceRange, replacementString: completion) {
-                    tv.replaceCharacters(in: replaceRange, with: completion)
-                    tv.didChangeText()
-                    let newPos = range.location + (completion as NSString).length
-                    tv.setSelectedRange(NSRange(location: newPos, length: 0))
-                }
-            }
-            DispatchQueue.main.async { linkCompletion = nil }
-            return  // text updated via replaceCharacters → textDidChange will sync binding
-        }
+        context.coordinator.parent = self
+        context.coordinator.attachIfNeeded(to: scrollView)
 
         if tv.string != text { tv.string = text }
 
@@ -682,6 +870,7 @@ struct JottNativeInput: NSViewRepresentable {
         tv.insertionPointColor = jottCursorColor
         tv.jottPlaceholder = placeholder
         tv.jottPlaceholderColor = jottPlaceholder
+        context.coordinator.applyLinkHighlighting(to: tv)
 
         if isFocused, tv.window?.firstResponder !== tv {
             tv.window?.makeFirstResponder(tv)
@@ -694,7 +883,23 @@ struct JottNativeInput: NSViewRepresentable {
         var parent: JottNativeInput
         weak var scrollView: NSScrollView?
         private var lastReportedHeight: CGFloat = 0
+        var isPerformingCompletion = false
+        private var isApplyingAttributes = false
+        private var completionSubscription: AnyCancellable?
+        private static let linkRegex = try? NSRegularExpression(pattern: "\\[\\[[^\\]]+\\]\\]")
         init(_ p: JottNativeInput) { parent = p }
+
+        func attachIfNeeded(to scrollView: NSScrollView) {
+            self.scrollView = scrollView
+            guard completionSubscription == nil else { return }
+
+            completionSubscription = parent.viewModel.$pendingLinkCompletionTitle
+                .receive(on: RunLoop.main)
+                .sink { [weak self] title in
+                    guard let self, let title else { return }
+                    self.applyLinkCompletion(title)
+                }
+        }
 
         func reportHeight(from tv: NSTextView) {
             guard let lm = tv.layoutManager, let tc = tv.textContainer else { return }
@@ -710,10 +915,79 @@ struct JottNativeInput: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
+            guard !isPerformingCompletion else { return }
+            guard !isApplyingAttributes else { return }
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
             reportHeight(from: tv)
             detectLinkTrigger(in: tv)
+            applyLinkHighlighting(to: tv)
+        }
+
+        private func applyLinkCompletion(_ title: String) {
+            guard let tv = scrollView?.documentView as? JottNSTextView else { return }
+
+            let cursorPos = tv.selectedRange().location
+            let nsStr = tv.string as NSString
+            let beforeCursor = nsStr.substring(with: NSRange(location: 0, length: cursorPos))
+            let range = (beforeCursor as NSString).range(of: "[[", options: .backwards)
+
+            guard range.location != NSNotFound else {
+                parent.linkCompletion = nil
+                return
+            }
+
+            let completion = "[[\(title)]]"
+            let replaceRange = NSRange(location: range.location, length: cursorPos - range.location)
+
+            isPerformingCompletion = true
+            if tv.shouldChangeText(in: replaceRange, replacementString: completion) {
+                tv.replaceCharacters(in: replaceRange, with: completion)
+                tv.didChangeText()
+                let newPos = range.location + (completion as NSString).length
+                tv.setSelectedRange(NSRange(location: newPos, length: 0))
+            }
+            isPerformingCompletion = false
+
+            parent.text = tv.string
+            parent.linkCompletion = nil
+            reportHeight(from: tv)
+            applyLinkHighlighting(to: tv)
+        }
+
+        func applyLinkHighlighting(to tv: NSTextView) {
+            guard let textStorage = tv.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: (tv.string as NSString).length)
+            guard fullRange.length > 0 else { return }
+
+            isApplyingAttributes = true
+            let selected = tv.selectedRange()
+            textStorage.beginEditing()
+
+            let baseAttrs: [NSAttributedString.Key: Any] = [
+                .font: tv.font ?? NSFont.systemFont(ofSize: 17),
+                .foregroundColor: tv.textColor ?? NSColor.textColor
+            ]
+            textStorage.setAttributes(baseAttrs, range: fullRange)
+
+            if let regex = Self.linkRegex {
+                let matches = regex.matches(in: tv.string, range: fullRange)
+                for m in matches {
+                    textStorage.addAttributes(
+                        [
+                            .foregroundColor: jottLinkHighlightText,
+                            .backgroundColor: jottLinkHighlightBg,
+                            .underlineStyle: NSUnderlineStyle.single.rawValue,
+                            .underlineColor: jottLinkUnderline
+                        ],
+                        range: m.range
+                    )
+                }
+            }
+
+            textStorage.endEditing()
+            tv.setSelectedRange(selected)
+            isApplyingAttributes = false
         }
 
         private func detectLinkTrigger(in tv: NSTextView) {
@@ -725,10 +999,16 @@ struct JottNativeInput: NSViewRepresentable {
             let beforeCursor = String((tv.string as NSString).substring(with: NSRange(location: 0, length: cursorPos)))
             if let bracketRange = beforeCursor.range(of: "[[", options: .backwards) {
                 let query = String(beforeCursor[bracketRange.upperBound...])
-                // Only trigger if no closing ]] between [[ and cursor
                 if !query.contains("]]") {
                     parent.viewModel.updateLinkQuery(query)
                     return
+                }
+                if query.hasSuffix("]]") {
+                    let trimmed = String(query.dropLast(2))
+                    if !trimmed.contains("]]") {
+                        parent.viewModel.updateLinkQuery(trimmed)
+                        return
+                    }
                 }
             }
             if parent.viewModel.isLinkAutocompleting {
@@ -747,6 +1027,10 @@ struct JottNativeInput: NSViewRepresentable {
                     parent.viewModel.moveLinkSelection(by: -1)
                     return true
                 }
+                if sel == #selector(NSResponder.insertTab(_:)) {
+                    parent.viewModel.selectCurrentLinkCandidate()
+                    return true
+                }
                 if sel == #selector(NSResponder.insertNewline(_:)) {
                     parent.viewModel.selectCurrentLinkCandidate()
                     return true
@@ -756,12 +1040,61 @@ struct JottNativeInput: NSViewRepresentable {
                     return true
                 }
             }
+            // Command mode creation: Enter creates the item
+            if sel == #selector(NSResponder.insertNewline(_:)),
+               parent.viewModel.commandMode != nil,
+               !parent.viewModel.inputText.isEmpty,
+               parent.viewModel.commandCreationPreview() != nil {
+                let vm = parent.viewModel
+                DispatchQueue.main.async { vm.createFromCommandMode() }
+                return true
+            }
+            if parent.viewModel.currentCommand != nil {
+                let items = parent.viewModel.currentCommandItems()
+                if !items.isEmpty {
+                    if sel == #selector(NSResponder.moveDown(_:)) {
+                        parent.viewModel.moveCommandSelection(by: 1)
+                        return true
+                    }
+                    if sel == #selector(NSResponder.moveUp(_:)) {
+                        parent.viewModel.moveCommandSelection(by: -1)
+                        return true
+                    }
+                    if sel == #selector(NSResponder.insertNewline(_:)) {
+                        parent.viewModel.openSelectedCommandItem()
+                        return true
+                    }
+                }
+            }
+            // Tab-complete a /command suggestion → lock commandMode, clear input
+            if sel == #selector(NSResponder.insertTab(_:)),
+               !parent.viewModel.isForcedCreationMode,
+               parent.viewModel.commandMode == nil,
+               parent.viewModel.inputText.hasPrefix("/") {
+                let query = parent.viewModel.inputText.lowercased().dropFirst()
+                let match = allCommandChips.first {
+                    $0.label.lowercased().hasPrefix(query) ||
+                    String($0.shorthand.dropFirst()).hasPrefix(query) ||
+                    String($0.insert.dropFirst()).hasPrefix(query)
+                }
+                if let match, let cmd = JottCommand(input: match.insert) {
+                    parent.viewModel.activateCommandMode(cmd)
+                    tv.string = ""
+                    tv.setSelectedRange(NSRange(location: 0, length: 0))
+                    parent.text = ""
+                    return true
+                }
+            }
             if sel == #selector(NSResponder.cancelOperation(_:)) {
                 parent.onEscape()
                 return true
             }
             if sel == #selector(NSResponder.deleteBackward(_:)), tv.string.isEmpty {
-                parent.onBackspaceOnEmpty?()
+                if parent.viewModel.commandMode != nil {
+                    parent.viewModel.clearCommandMode()
+                } else {
+                    parent.onBackspaceOnEmpty?()
+                }
                 return true
             }
             return false
@@ -879,6 +1212,7 @@ struct JottFormatBar: View {
 struct JottRow: View {
     let item: TimelineItem
     @ObservedObject var viewModel: OverlayViewModel
+    var isSelected: Bool = false
     @State private var hovered = false
 
     var accent: Color {
@@ -918,10 +1252,18 @@ struct JottRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(accent)
-                .frame(width: 18)
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(accent)
+                    .frame(width: 18)
+                if case .note(let n) = item, n.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 6, weight: .bold))
+                        .foregroundColor(.orange)
+                        .offset(x: 6, y: -5)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -991,13 +1333,22 @@ struct JottRow: View {
         .padding(.vertical, 8)
         .background(
             Group {
-                if hovered {
+                if hovered || isSelected {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
+                        .fill(isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05))
                         .padding(.horizontal, 6)
                 }
             }
         )
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule()
+                    .fill(accent.opacity(0.85))
+                    .frame(width: 3, height: 18)
+                    .padding(.leading, 13)
+                    .shadow(color: accent.opacity(0.4), radius: 4, x: 0, y: 0)
+            }
+        }
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) { hovered = h } }
         .animation(.spring(response: 0.24, dampingFraction: 0.65), value: hovered)

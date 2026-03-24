@@ -12,5 +12,3 @@ struct ContentView: View {
         EmptyView()
     }
 }
-
- 

@@ -50,6 +50,14 @@ struct DetailView: View {
                     Spacer()
 
                     if let note = viewModel.selectedNote, !viewModel.isEditingNote {
+                        // Pin toggle
+                        Button(action: { viewModel.togglePin(note) }) {
+                            Image(systemName: note.isPinned ? "pin.fill" : "pin")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(note.isPinned ? .orange : (viewModel.isDarkMode ? Color(red: 0.75, green: 0.82, blue: 0.75) : Color(red: 0.45, green: 0.75, blue: 0.55)))
+                        }
+                        .buttonStyle(.plain)
+
                         // Open in editor (Cmd+O)
                         Button(action: { viewModel.openNoteInEditor(note) }) {
                             Image(systemName: "arrow.up.right.square")
@@ -199,6 +207,15 @@ struct NoteDetailContent: View {
     let note: Note
     @ObservedObject var viewModel: OverlayViewModel
     @State private var showingLinkPicker = false
+    @State private var showMarkdownPreview = false
+
+    private var wordCount: Int {
+        note.text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
+    }
+    private var readingTime: String {
+        let mins = max(1, wordCount / 200)
+        return "\(mins) min read"
+    }
 
     var linkedNotes: [Note] { viewModel.linkedNotes(for: note) }
     var backlinks: [Note]   { viewModel.backlinks(for: note) }
@@ -216,10 +233,34 @@ struct NoteDetailContent: View {
                             .stroke(Color.gray.opacity(0.3), lineWidth: 0.75)
                     )
             } else {
-                Text(note.text)
-                    .font(.system(size: 16, weight: .semibold))
+                HStack(alignment: .top, spacing: 0) {
+                    Group {
+                        if showMarkdownPreview,
+                           let attrStr = try? AttributedString(markdown: note.text) {
+                            Text(attrStr)
+                                .font(.system(size: 15))
+                                .lineSpacing(2)
+                        } else {
+                            Text(note.text)
+                                .font(.system(size: 16, weight: .semibold))
+                                .lineSpacing(1.5)
+                        }
+                    }
                     .foregroundColor(viewModel.isDarkMode ? .white : .black)
-                    .lineSpacing(1.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { showMarkdownPreview.toggle() }
+                    } label: {
+                        Image(systemName: showMarkdownPreview ? "text.alignleft" : "doc.richtext")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(showMarkdownPreview ? Color.accentColor.opacity(0.7) : .secondary.opacity(0.35))
+                            .padding(5)
+                            .background(showMarkdownPreview ? Color.accentColor.opacity(0.08) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             Divider()
@@ -228,6 +269,7 @@ struct NoteDetailContent: View {
             VStack(alignment: .leading, spacing: 7) {
                 DetailInfoRow(label: "Created", value: formatDate(note.timestamp), isDarkMode: viewModel.isDarkMode)
                 DetailInfoRow(label: "Modified", value: formatDate(note.modifiedAt), isDarkMode: viewModel.isDarkMode)
+                DetailInfoRow(label: "Words", value: "\(wordCount)  ·  \(readingTime)", isDarkMode: viewModel.isDarkMode)
             }
 
             if !note.tags.isEmpty {
@@ -240,26 +282,32 @@ struct NoteDetailContent: View {
                         .foregroundColor(.gray)
                         .tracking(0.5)
 
-                    VStack(alignment: .leading, spacing: 5) {
+                    FlowLayout(spacing: 6) {
                         ForEach(note.tags, id: \.self) { tag in
-                            Text("#\(tag)")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color(red: 0.75, green: 0.82, blue: 0.75),
-                                            Color(red: 0.78, green: 0.84, blue: 0.78),
-                                            Color(red: 0.72, green: 0.80, blue: 0.72)
-                                        ]),
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+                            Button {
+                                viewModel.setTagFilter(tag)
+                                viewModel.selectedNote = nil
+                            } label: {
+                                Text("#\(tag)")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 0.75, green: 0.82, blue: 0.75),
+                                                Color(red: 0.78, green: 0.84, blue: 0.78),
+                                                Color(red: 0.72, green: 0.80, blue: 0.72)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
-                                .cornerRadius(5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                    .cornerRadius(5)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Filter notes by #\(tag)")
                         }
                     }
                 }
@@ -293,7 +341,7 @@ struct NoteDetailContent: View {
                 }
 
                 if linkedNotes.isEmpty && backlinks.isEmpty {
-                    Text("No linked notes yet")
+                    Text("No linked notes yet. Type [[ to link.")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 } else {
@@ -363,6 +411,7 @@ struct LinkedNoteChip: View {
     let isDarkMode: Bool
     let onTap: () -> Void
     let onRemove: (() -> Void)?
+    @State private var hovered = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -376,6 +425,9 @@ struct LinkedNoteChip: View {
                         .lineLimit(1)
                         .foregroundColor(isDarkMode ? .white : .black)
                     Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.55))
                 }
             }
             .buttonStyle(.plain)
@@ -399,6 +451,11 @@ struct LinkedNoteChip: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(Color.jottGreen.opacity(0.25), lineWidth: 0.5)
         )
+        .shadow(color: Color.black.opacity(hovered ? 0.12 : 0), radius: hovered ? 6 : 0, x: 0, y: 2)
+        .scaleEffect(hovered ? 1.01 : 1.0)
+        .onHover { h in
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.82)) { hovered = h }
+        }
     }
 }
 
@@ -707,6 +764,32 @@ struct DetailInfoRow: View {
                 .lineLimit(2)
 
             Spacer()
+        }
+    }
+}
+
+// Simple wrapping flow layout for tags
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0; var y: CGFloat = 0; var rowH: CGFloat = 0
+        for sv in subviews {
+            let s = sv.sizeThatFits(.unspecified)
+            if x + s.width > width, x > 0 { y += rowH + spacing; x = 0; rowH = 0 }
+            rowH = max(rowH, s.height); x += s.width + spacing
+        }
+        return CGSize(width: width, height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX; var y = bounds.minY; var rowH: CGFloat = 0
+        for sv in subviews {
+            let s = sv.sizeThatFits(.unspecified)
+            if x + s.width > bounds.maxX, x > bounds.minX { y += rowH + spacing; x = bounds.minX; rowH = 0 }
+            sv.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+            rowH = max(rowH, s.height); x += s.width + spacing
         }
     }
 }

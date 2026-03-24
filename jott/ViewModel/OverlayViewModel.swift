@@ -18,6 +18,7 @@ final class OverlayViewModel: ObservableObject {
             defer { isProcessing = false }
             stripCreationPrefixIfNeeded()   // strip /note , /reminder , /meeting  → sets forcedTypeOverride
             detectType()
+            updateCommandSelectionIfNeeded()
             scheduleAutoSave()
         }
     }
@@ -35,10 +36,12 @@ final class OverlayViewModel: ObservableObject {
     // Note editing
     @Published var isEditingNote: Bool = false
     @Published var editingNoteText: String = ""
+    @Published var selectedCommandIndex: Int = 0
 
     // MARK: - Private
     private let store: NoteStore
     private var isProcessing = false
+    private var lastCommand: JottCommand?
 
     /// Stable ID for the current open session's note
     private var sessionNoteId: UUID?
@@ -111,6 +114,7 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Session-based auto-save (debounced 0.6s)
     private func scheduleAutoSave() {
+        guard commandMode == nil else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let allowable = !text.hasPrefix("/") || isForcedCreationMode
         guard !text.isEmpty, allowable else { return }
@@ -199,13 +203,17 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Lifecycle
     func show() {
+        autoSaveStatus = ""
+        if !inputText.isEmpty {
+            isVisible = true
+            return
+        }
         forcedTypeOverride = nil
         sessionNoteId = nil
         selectedNote = nil
         selectedReminder = nil
         selectedMeeting = nil
         isEditingNote = false
-        autoSaveStatus = ""
         // Clipboard watch: pre-fill if user just copied something
         if let copied = ClipboardMonitor.shared.consume() {
             inputText = copied
@@ -219,15 +227,13 @@ final class OverlayViewModel: ObservableObject {
 
     func dismiss() {
         autoSaveTask?.cancel()
+        commandMode = nil
         // Save whatever is typed right now (if non-empty)
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty && (!text.hasPrefix("/") || isForcedCreationMode) {
             commitSession()
         }
         isVisible = false
-        inputText = ""
-        forcedTypeOverride = nil
-        sessionNoteId = nil
         selectedNote = nil
         selectedReminder = nil
         selectedMeeting = nil
@@ -238,15 +244,103 @@ final class OverlayViewModel: ObservableObject {
     func toggle() { isVisible ? dismiss() : show() }
     func handleEscape() { dismiss() }
 
+    var currentCommand: JottCommand? {
+        if let mode = commandMode {
+            switch mode {
+            case .notes:     return .notes(query: inputText)
+            case .reminders: return .reminders(query: inputText)
+            case .meetings:  return .meetings(query: inputText)
+            default:         return mode
+            }
+        }
+        if isForcedCreationMode { return nil }
+        return JottCommand(input: inputText)
+    }
+
+    func currentCommandItems() -> [TimelineItem] {
+        guard let cmd = currentCommand else { return [] }
+        return commandItems(for: cmd)
+    }
+
+    func commandItems(for command: JottCommand) -> [TimelineItem] {
+        switch command {
+        case .notes(let q):
+            let notes = q.isEmpty ? getAllNotes() : searchNotes(q)
+            return notes.map { .note($0) }
+        case .reminders(let q):
+            let all = getAllReminders()
+            if q.isEmpty { return all.map { .reminder($0) } }
+            return all.filter { $0.text.lowercased().contains(q.lowercased()) }.map { .reminder($0) }
+        case .meetings(let q):
+            let all = getAllMeetings()
+            if q.isEmpty { return all.map { .meeting($0) } }
+            return all.filter { $0.title.lowercased().contains(q.lowercased()) }.map { .meeting($0) }
+        case .search(let q):
+            guard !q.isEmpty else { return [] }
+            return searchNotes(q).map { .note($0) }
+        case .open:
+            return []
+        case .calendar:
+            return []
+        }
+    }
+
+    func updateCommandSelectionIfNeeded() {
+        let cmd = currentCommand
+        if cmd != lastCommand {
+            selectedCommandIndex = 0
+            lastCommand = cmd
+        }
+        if cmd == nil {
+            selectedCommandIndex = 0
+        }
+    }
+
+    func moveCommandSelection(by delta: Int) {
+        let items = currentCommandItems()
+        guard !items.isEmpty else { return }
+        let next = max(0, min(selectedCommandIndex + delta, items.count - 1))
+        selectedCommandIndex = next
+    }
+
+    func openSelectedCommandItem() {
+        let items = currentCommandItems()
+        guard !items.isEmpty else { return }
+        let idx = max(0, min(selectedCommandIndex, items.count - 1))
+        switch items[idx] {
+        case .note(let n):     selectedNote = n
+        case .reminder(let r): selectedReminder = r
+        case .meeting(let m):  selectedMeeting = m
+        }
+    }
+
+    // MARK: - Tag filter
+    @Published var activeTagFilter: String? = nil
+
+    func setTagFilter(_ tag: String?) {
+        withAnimation(.easeInOut(duration: 0.2)) { activeTagFilter = tag }
+    }
+
     // MARK: - Data access
-    func getAllNotes()     -> [Note]     { store.allNotes() }
+    func getAllNotes() -> [Note] {
+        let notes = store.allNotes()
+        guard let tag = activeTagFilter else { return notes }
+        return notes.filter { $0.tags.contains(tag) }
+    }
     func getAllReminders() -> [Reminder] { store.allReminders() }
     func getAllMeetings()  -> [Meeting]  { store.allMeetings() }
 
     func searchNotes(_ query: String) -> [Note] {
-        guard !query.isEmpty else { return store.allNotes() }
+        guard !query.isEmpty else { return getAllNotes() }
         let q = query.lowercased()
-        return store.allNotes().filter { $0.text.lowercased().contains(q) }
+        return getAllNotes().filter { $0.text.lowercased().contains(q) }
+    }
+
+    // MARK: - Pin
+    func togglePin(_ note: Note) {
+        store.togglePin(note.id)
+        if selectedNote?.id == note.id { selectedNote = store.note(for: note.id) }
+        objectWillChange.send()
     }
 
     // MARK: - Delete
@@ -381,11 +475,40 @@ final class OverlayViewModel: ObservableObject {
             guard m.numberOfRanges > 1 else { continue }
             let r = m.range(at: 1)
             guard r.location != NSNotFound else { continue }
-            let title = ns.substring(with: r)
-            if let target = store.allNotes().first(where: {
-                $0.id != noteId &&
-                ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text) == title
-            }) {
+            let rawTitle = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawTitle.isEmpty else { continue }
+            let needle = rawTitle.lowercased()
+            let candidates = store.allNotes().filter { $0.id != noteId }
+
+            let exact = candidates.first(where: {
+                let t = ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                return t == needle
+            })
+            if let target = exact {
+                store.linkNotes(fromId: noteId, toId: target.id)
+                continue
+            }
+
+            let prefixMatches = candidates.filter {
+                let t = ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                return t.hasPrefix(needle)
+            }
+            if prefixMatches.count == 1, let target = prefixMatches.first {
+                store.linkNotes(fromId: noteId, toId: target.id)
+                continue
+            }
+
+            let containsMatches = candidates.filter {
+                let t = ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                return t.contains(needle)
+            }
+            if containsMatches.count == 1, let target = containsMatches.first {
                 store.linkNotes(fromId: noteId, toId: target.id)
             }
         }
@@ -450,6 +573,62 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Legacy stubs (kept for DetailView compatibility)
     @Published var showFilterMenu: Bool = false
+
+    // MARK: - Command Mode (badge-locked command entry)
+    @Published var commandMode: JottCommand? = nil
+
+    func activateCommandMode(_ cmd: JottCommand) {
+        commandMode = cmd
+    }
+
+    func clearCommandMode() {
+        commandMode = nil
+    }
+
+    // MARK: - Command mode creation
+
+    /// Returns (title, date, hasExplicitDate) when commandMode supports creation and inputText is non-empty.
+    func commandCreationPreview() -> (title: String, date: Date, hasDate: Bool)? {
+        guard let mode = commandMode else { return nil }
+        let text = inputText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        switch mode {
+        case .calendar, .meetings, .reminders:
+            let result = NaturalLanguageParser.parseForEvent(from: text)
+            return (title: result.title, date: result.date, hasDate: result.hasExplicitDate)
+        default:
+            return nil
+        }
+    }
+
+    @discardableResult
+    func createFromCommandMode() -> Bool {
+        guard let mode = commandMode else { return false }
+        let text = inputText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return false }
+        let result = NaturalLanguageParser.parseForEvent(from: text)
+
+        switch mode {
+        case .calendar:
+            let ok = calendarManager.createEvent(title: result.title, startDate: result.date)
+            if ok { inputText = ""; commandMode = nil; showSavedIndicator() }
+            return ok
+        case .meetings:
+            store.saveMeeting(Meeting(title: result.title, participants: [], startTime: result.date, tags: []))
+            inputText = ""; commandMode = nil; showSavedIndicator()
+            objectWillChange.send()
+            return true
+        case .reminders:
+            let r = Reminder(text: result.title, dueDate: result.date, tags: [])
+            store.saveReminder(r)
+            NotificationManager.shared.scheduleReminder(r)
+            inputText = ""; commandMode = nil; showSavedIndicator()
+            objectWillChange.send()
+            return true
+        default:
+            return false
+        }
+    }
 
     // MARK: - Dynamic panel sizing
     @Published var contentHeight: CGFloat = 72

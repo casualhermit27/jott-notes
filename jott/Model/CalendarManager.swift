@@ -39,4 +39,20 @@ final class CalendarManager: ObservableObject {
             tags: []
         )
     }
+
+    @discardableResult
+    func createEvent(title: String, startDate: Date, durationMinutes: Int = 60) -> Bool {
+        guard isAuthorized else { return false }
+        let event = EKEvent(eventStore: store)
+        event.title = title
+        event.startDate = startDate
+        event.endDate = startDate.addingTimeInterval(TimeInterval(durationMinutes * 60))
+        event.calendar = store.defaultCalendarForNewEvents
+        do {
+            try store.save(event, span: .thisEvent)
+            return true
+        } catch {
+            return false
+        }
+    }
 }
