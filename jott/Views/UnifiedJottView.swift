@@ -38,7 +38,7 @@ struct UnifiedJottView: View {
             Spacer() // transparent — fills the rest of the 420px panel
         }
         .frame(width: 520, height: 420) // matches fixed panel size exactly
-        .colorScheme(.light)
+        .colorScheme(viewModel.isDarkMode ? .dark : .light)
     }
 }
 
@@ -94,7 +94,6 @@ struct JottCaptureView: View {
                 }
                 if showingCreationPreview {
                     ItemCreationPreviewCard(viewModel: viewModel)
-                        .frame(height: 260)
                         .transition(.asymmetric(
                             insertion: .opacity.animation(.easeIn(duration: 0.12)),
                             removal:   .opacity.animation(.easeOut(duration: 0.08))
@@ -112,7 +111,7 @@ struct JottCaptureView: View {
             }
         }
         .clipped()
-        .background(jottBarLight)
+        .background(viewModel.isDarkMode ? jottBarDark : jottBarLight)
         .animation(
             (viewModel.isLinkAutocompleting || command != nil)
                 ? .spring(response: 0.36, dampingFraction: 0.82)
@@ -552,16 +551,17 @@ struct JottCommandSuggestionBar: View {
 
 struct ItemCreationPreviewCard: View {
     @ObservedObject var viewModel: OverlayViewModel
+    @State private var showDatePicker = false
 
-    private func formattedDate(_ date: Date, hasDate: Bool) -> String {
+    private func formattedDate(_ date: Date) -> String {
         let cal = Calendar.current
         let df = DateFormatter()
         let day: String
-        if cal.isDateInToday(date)     { day = "Today" }
+        if cal.isDateInToday(date)         { day = "Today" }
         else if cal.isDateInTomorrow(date) { day = "Tomorrow" }
-        else { df.dateFormat = "EEEE, MMM d"; day = df.string(from: date) }
+        else { df.dateFormat = "EEE, MMM d"; day = df.string(from: date) }
         df.dateFormat = "h:mm a"
-        return "\(day) · \(df.string(from: date))"
+        return "\(day)  \(df.string(from: date))"
     }
 
     var body: some View {
@@ -579,9 +579,7 @@ struct ItemCreationPreviewCard: View {
                 }
             }()
 
-            VStack(spacing: 0) {
-                Spacer()
-                VStack(spacing: 10) {
+            VStack(spacing: 10) {
                     HStack(spacing: 14) {
                         Image(systemName: iconName)
                             .font(.system(size: 22, weight: .semibold))
@@ -590,16 +588,69 @@ struct ItemCreationPreviewCard: View {
                             .background(accentColor.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Text(p.title)
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(Color(red: 0.10, green: 0.10, blue: 0.12))
+                                .foregroundColor(.primary)
                                 .lineLimit(2)
-                            Text(formattedDate(p.date, hasDate: p.hasDate))
-                                .font(.system(size: 12))
-                                .foregroundColor(p.hasDate
-                                    ? accentColor.opacity(0.75)
-                                    : Color.secondary.opacity(0.4))
+
+                            // Tappable date/time pill → opens DatePicker popover
+                            Button {
+                                showDatePicker = true
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "clock")
+                                        .font(.system(size: 10, weight: .medium))
+                                    Text(formattedDate(p.date))
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(p.hasDate ? accentColor : .secondary.opacity(0.5))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(accentColor.opacity(p.hasDate ? 0.09 : 0.04))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(accentColor.opacity(p.hasDate ? 0.22 : 0.12), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .popover(isPresented: $showDatePicker, arrowEdge: .bottom) {
+                                VStack(spacing: 0) {
+                                    DatePicker(
+                                        "",
+                                        selection: Binding(
+                                            get: { viewModel.commandModeDateOverride ?? p.date },
+                                            set: { viewModel.commandModeDateOverride = $0 }
+                                        ),
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                    .datePickerStyle(.graphical)
+                                    .labelsHidden()
+                                    .padding(12)
+
+                                    Divider().opacity(0.15)
+                                    Button("Done") { showDatePicker = false }
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(accentColor)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                }
+                                .frame(width: 300)
+                            }
+
+                            if let rec = p.recurrence {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "repeat")
+                                        .font(.system(size: 9, weight: .semibold))
+                                    Text(rec.label)
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundColor(accentColor.opacity(0.65))
+                            }
                         }
                         Spacer()
                     }
@@ -610,7 +661,6 @@ struct ItemCreationPreviewCard: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(accentColor.opacity(0.12), lineWidth: 1)
                     )
-                    .padding(.horizontal, 20)
 
                     HStack(spacing: 8) {
                         Image(systemName: "return")
@@ -626,8 +676,8 @@ struct ItemCreationPreviewCard: View {
                             .foregroundColor(.secondary.opacity(0.3))
                     }
                 }
-                Spacer()
-            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
         }
     }
 }
@@ -863,13 +913,17 @@ struct JottNativeInput: NSViewRepresentable {
 
         if tv.string != text { tv.string = text }
 
-        // Background is always light (#d9d9d9), so text is always dark
-        let textColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1)
+        let textColor: NSColor = isDark
+            ? NSColor(white: 0.92, alpha: 1)
+            : NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1)
+        let placeholderColor: NSColor = isDark
+            ? NSColor(white: 0.45, alpha: 1)
+            : jottPlaceholder
         tv.font = .systemFont(ofSize: 17)
         tv.textColor = textColor
         tv.insertionPointColor = jottCursorColor
         tv.jottPlaceholder = placeholder
-        tv.jottPlaceholderColor = jottPlaceholder
+        tv.jottPlaceholderColor = placeholderColor
         context.coordinator.applyLinkHighlighting(to: tv)
 
         if isFocused, tv.window?.firstResponder !== tv {

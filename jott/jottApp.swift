@@ -85,10 +85,13 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            Button(action: { appDelegate.windowController?.toggleDarkMode() }) {
+            Button(action: {
+                appDelegate.windowController?.toggleDarkMode()
+                menuBarStore.refresh()
+            }) {
                 HStack {
-                    Image(systemName: appDelegate.windowController?.isDarkMode ?? false ? "sun.max" : "moon")
-                    Text(appDelegate.windowController?.isDarkMode ?? false ? "Light Mode" : "Dark Mode")
+                    Image(systemName: menuBarStore.isDarkMode ? "sun.max" : "moon")
+                    Text(menuBarStore.isDarkMode ? "Light Mode" : "Dark Mode")
                 }
             }
             .buttonStyle(.plain)
@@ -135,9 +138,11 @@ struct MenuBarContentView: View {
 @MainActor
 final class MenuBarStore: ObservableObject {
     @Published var recentNotes: [Note] = []
+    @Published var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "jott_darkMode")
 
     func refresh() {
         recentNotes = Array(NoteStore.shared.allNotes().prefix(3))
+        isDarkMode = UserDefaults.standard.bool(forKey: "jott_darkMode")
     }
 }
 

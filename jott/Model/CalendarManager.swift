@@ -41,18 +41,48 @@ final class CalendarManager: ObservableObject {
     }
 
     @discardableResult
-    func createEvent(title: String, startDate: Date, durationMinutes: Int = 60) -> Bool {
+    func createEvent(title: String, startDate: Date, durationMinutes: Int = 60,
+                     recurrence: ParsedRecurrence? = nil) -> Bool {
         guard isAuthorized else { return false }
         let event = EKEvent(eventStore: store)
         event.title = title
         event.startDate = startDate
         event.endDate = startDate.addingTimeInterval(TimeInterval(durationMinutes * 60))
         event.calendar = store.defaultCalendarForNewEvents
+        if let rec = recurrence {
+            event.recurrenceRules = [makeRecurrenceRule(rec)]
+        }
         do {
             try store.save(event, span: .thisEvent)
             return true
         } catch {
             return false
         }
+    }
+
+    private func makeRecurrenceRule(_ rec: ParsedRecurrence) -> EKRecurrenceRule {
+        let freq: EKRecurrenceFrequency
+        switch rec.frequency {
+        case .daily:   freq = .daily
+        case .weekly:  freq = .weekly
+        case .monthly: freq = .monthly
+        case .yearly:  freq = .yearly
+        }
+        var daysOfWeek: [EKRecurrenceDayOfWeek]? = nil
+        if rec.frequency == .weekly, let wd = rec.weekday,
+           let ekDay = EKWeekday(rawValue: wd) {
+            daysOfWeek = [EKRecurrenceDayOfWeek(ekDay)]
+        }
+        return EKRecurrenceRule(
+            recurrenceWith: freq,
+            interval: rec.interval,
+            daysOfTheWeek: daysOfWeek,
+            daysOfTheMonth: nil,
+            monthsOfTheYear: nil,
+            weeksOfTheYear: nil,
+            daysOfTheYear: nil,
+            setPositions: nil,
+            end: nil
+        )
     }
 }

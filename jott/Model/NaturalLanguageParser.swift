@@ -1,5 +1,33 @@
 import Foundation
 
+// MARK: - Recurrence
+
+struct ParsedRecurrence: Equatable {
+    enum Frequency { case daily, weekly, monthly, yearly }
+    let frequency: Frequency
+    let interval: Int       // 1 = every, 2 = every other, etc.
+    let weekday: Int?       // EKWeekday rawValue (1=Sun…7=Sat), nil = no specific day
+
+    var label: String {
+        switch frequency {
+        case .daily:
+            return interval == 1 ? "Every day" : "Every \(interval) days"
+        case .weekly:
+            if let wd = weekday {
+                let names = [1:"Sunday",2:"Monday",3:"Tuesday",4:"Wednesday",
+                             5:"Thursday",6:"Friday",7:"Saturday"]
+                let dayName = names[wd] ?? "week"
+                return interval == 1 ? "Every \(dayName)" : "Every \(interval) weeks on \(dayName)"
+            }
+            return interval == 1 ? "Every week" : "Every \(interval) weeks"
+        case .monthly:
+            return interval == 1 ? "Every month" : "Every \(interval) months"
+        case .yearly:
+            return interval == 1 ? "Every year" : "Every \(interval) years"
+        }
+    }
+}
+
 enum ParsedContent {
     case note(text: String, tags: [String])
     case reminder(text: String, dueDate: Date, tags: [String])
@@ -209,7 +237,11 @@ struct NaturalLanguageParser {
             // Absolute dates: "april 1 2026", "1 april 2026", "april 1", "1 april"
             "\\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\\s+\\d{1,2}(?:\\s+\\d{4})?\\b",
             "\\b\\d{1,2}\\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)(?:\\s+\\d{4})?\\b",
-            "\\d{1,2}(?::?\\d{2})?\\s*(?:am|pm|AM|PM)"
+            "\\d{1,2}(?::?\\d{2})?\\s*(?:am|pm|AM|PM)",
+            // Recurrence keywords
+            "\\bevery\\s+(?:other\\s+week|day|week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b",
+            "\\bevery\\s+\\d+\\s+(?:days?|weeks?|months?|years?)\\b",
+            "\\b(?:daily|weekly|monthly|yearly|annually|biweekly|bi-weekly|fortnightly)\\b"
         ]
 
         for pattern in datePatterns {
@@ -217,6 +249,70 @@ struct NaturalLanguageParser {
         }
 
         return result
+    }
+
+    // MARK: - Recurrence detection
+
+    static func extractRecurrence(from text: String) -> ParsedRecurrence? {
+        let low = text.lowercased()
+
+        // "every N days/weeks/months/years" — check before single-keyword patterns
+        let numericPattern = #"every\s+(\d+)\s+(day|week|month|year)s?"#
+        if let regex = try? NSRegularExpression(pattern: numericPattern),
+           let m = regex.firstMatch(in: low, range: NSRange(low.startIndex..., in: low)) {
+            let ns = low as NSString
+            let n = Int(ns.substring(with: m.range(at: 1))) ?? 1
+            switch ns.substring(with: m.range(at: 2)) {
+            case "day":   return ParsedRecurrence(frequency: .daily,   interval: n, weekday: nil)
+            case "week":  return ParsedRecurrence(frequency: .weekly,  interval: n, weekday: nil)
+            case "month": return ParsedRecurrence(frequency: .monthly, interval: n, weekday: nil)
+            case "year":  return ParsedRecurrence(frequency: .yearly,  interval: n, weekday: nil)
+            default: break
+            }
+        }
+
+        // "biweekly" / "bi-weekly" / "every other week" / "fortnightly"
+        if low.contains("biweekly") || low.contains("bi-weekly") ||
+           low.contains("every other week") || low.contains("fortnightly") {
+            return ParsedRecurrence(frequency: .weekly, interval: 2, weekday: nil)
+        }
+
+        // "daily" / "every day"
+        if low.contains("daily") ||
+           low.range(of: #"\bevery\s+day\b"#, options: .regularExpression) != nil {
+            return ParsedRecurrence(frequency: .daily, interval: 1, weekday: nil)
+        }
+
+        // "every monday/tuesday/..." — specific weekday
+        let weekdayMap: [(String, Int)] = [
+            ("sunday",1),("monday",2),("tuesday",3),("wednesday",4),
+            ("thursday",5),("friday",6),("saturday",7)
+        ]
+        if low.range(of: #"\bevery\b"#, options: .regularExpression) != nil {
+            for (name, num) in weekdayMap where low.contains(name) {
+                return ParsedRecurrence(frequency: .weekly, interval: 1, weekday: num)
+            }
+        }
+
+        // "weekly" / "every week"
+        if low.contains("weekly") ||
+           low.range(of: #"\bevery\s+week\b"#, options: .regularExpression) != nil {
+            return ParsedRecurrence(frequency: .weekly, interval: 1, weekday: nil)
+        }
+
+        // "monthly" / "every month"
+        if low.contains("monthly") ||
+           low.range(of: #"\bevery\s+month\b"#, options: .regularExpression) != nil {
+            return ParsedRecurrence(frequency: .monthly, interval: 1, weekday: nil)
+        }
+
+        // "yearly" / "annually" / "every year"
+        if low.contains("yearly") || low.contains("annually") ||
+           low.range(of: #"\bevery\s+year\b"#, options: .regularExpression) != nil {
+            return ParsedRecurrence(frequency: .yearly, interval: 1, weekday: nil)
+        }
+
+        return nil
     }
 
     /// Parses "april 1", "1 april", "april 1 2026", "1 april 2026" into a Date.

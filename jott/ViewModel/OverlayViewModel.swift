@@ -228,6 +228,7 @@ final class OverlayViewModel: ObservableObject {
     func dismiss() {
         autoSaveTask?.cancel()
         commandMode = nil
+        commandModeDateOverride = nil
         // Save whatever is typed right now (if non-empty)
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty && (!text.hasPrefix("/") || isForcedCreationMode) {
@@ -576,26 +577,34 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Command Mode (badge-locked command entry)
     @Published var commandMode: JottCommand? = nil
+    /// Overrides the NLP-parsed date when user picks from the date selector.
+    @Published var commandModeDateOverride: Date? = nil
 
     func activateCommandMode(_ cmd: JottCommand) {
         commandMode = cmd
+        commandModeDateOverride = nil
     }
 
     func clearCommandMode() {
         commandMode = nil
+        commandModeDateOverride = nil
     }
 
     // MARK: - Command mode creation
 
-    /// Returns (title, date, hasExplicitDate) when commandMode supports creation and inputText is non-empty.
-    func commandCreationPreview() -> (title: String, date: Date, hasDate: Bool)? {
+    /// Returns preview info when commandMode supports creation and inputText is non-empty.
+    func commandCreationPreview() -> (title: String, date: Date, hasDate: Bool, recurrence: ParsedRecurrence?)? {
         guard let mode = commandMode else { return nil }
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
         switch mode {
         case .calendar, .meetings, .reminders:
             let result = NaturalLanguageParser.parseForEvent(from: text)
-            return (title: result.title, date: result.date, hasDate: result.hasExplicitDate)
+            let rec    = NaturalLanguageParser.extractRecurrence(from: text)
+            // Date picker override takes priority over NLP result
+            let date   = commandModeDateOverride ?? result.date
+            let hasDate = commandModeDateOverride != nil || result.hasExplicitDate
+            return (title: result.title, date: date, hasDate: hasDate, recurrence: rec)
         default:
             return nil
         }
@@ -607,19 +616,22 @@ final class OverlayViewModel: ObservableObject {
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return false }
         let result = NaturalLanguageParser.parseForEvent(from: text)
+        let rec    = NaturalLanguageParser.extractRecurrence(from: text)
+        let date   = commandModeDateOverride ?? result.date
 
         switch mode {
         case .calendar:
-            let ok = calendarManager.createEvent(title: result.title, startDate: result.date)
+            let ok = calendarManager.createEvent(title: result.title, startDate: date, recurrence: rec)
             if ok { inputText = ""; commandMode = nil; showSavedIndicator() }
             return ok
         case .meetings:
-            store.saveMeeting(Meeting(title: result.title, participants: [], startTime: result.date, tags: []))
+            let recLabel = rec.map { " (\($0.label))" } ?? ""
+            store.saveMeeting(Meeting(title: result.title + recLabel, participants: [], startTime: date, tags: []))
             inputText = ""; commandMode = nil; showSavedIndicator()
             objectWillChange.send()
             return true
         case .reminders:
-            let r = Reminder(text: result.title, dueDate: result.date, tags: [])
+            let r = Reminder(text: result.title, dueDate: date, tags: [])
             store.saveReminder(r)
             NotificationManager.shared.scheduleReminder(r)
             inputText = ""; commandMode = nil; showSavedIndicator()
