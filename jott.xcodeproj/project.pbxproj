@@ -257,9 +257,9 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
-				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = YES;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
@@ -272,8 +272,10 @@
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "Jott needs Accessibility access to listen for the global hotkey from any app.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Jott reads your calendar to show and import upcoming events as meetings.";
-				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "";
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Jott can create calendar events on your behalf.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -303,9 +305,9 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
-				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = YES;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
@@ -318,8 +320,10 @@
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "Jott needs Accessibility access to listen for the global hotkey from any app.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Jott reads your calendar to show and import upcoming events as meetings.";
-				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "";
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Jott can create calendar events on your behalf.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

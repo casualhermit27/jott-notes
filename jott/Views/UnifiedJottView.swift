@@ -26,7 +26,6 @@ struct UnifiedJottView: View {
                         ))
                 } else {
                     JottCaptureView(viewModel: viewModel)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .transition(.asymmetric(
                             insertion: .push(from: .leading),
                             removal:   .push(from: .trailing)
@@ -56,6 +55,7 @@ private let jottLinkUnderline = NSColor(red: 0.36, green: 0.33, blue: 0.95, alph
 
 struct JottCaptureView: View {
     @ObservedObject var viewModel: OverlayViewModel
+    @State private var showFormat = false
 
     var command: JottCommand? {
         guard !viewModel.isForcedCreationMode else { return nil }
@@ -68,56 +68,134 @@ struct JottCaptureView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            JottInputArea(viewModel: viewModel)
-                .fixedSize(horizontal: false, vertical: true)
+        let hasContent = !viewModel.inputText.isEmpty && !viewModel.inputText.hasPrefix("/")
+        let isSaved = viewModel.autoSaveStatus == "saved"
 
-            if viewModel.isLinkAutocompleting && !viewModel.linkCandidates.isEmpty {
-                Divider()
-                    .opacity(0.12)
-                    .transition(.opacity.animation(.easeOut(duration: 0.08)))
-                NoteLinkAutocompleteView(viewModel: viewModel)
+        let barColor = viewModel.isDarkMode ? jottBarDark : jottBarLight
+
+        VStack(spacing: 4) {
+            // Floating toolbar — bubbles up above the bar
+            HStack(spacing: 6) {
+                Spacer()
+                if isSaved {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(Color(red: 0.32, green: 0.78, blue: 0.54))
+                        Text("Saved")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.primary.opacity(0.65))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(barColor)
+                    .clipShape(Capsule())
                     .transition(.asymmetric(
-                        insertion: .scale(scale: 0.97, anchor: .top)
+                        insertion: .scale(scale: 0.4, anchor: .bottom)
                             .combined(with: .opacity)
-                            .animation(.spring(response: 0.28, dampingFraction: 0.78)),
-                        removal: .opacity.animation(.easeOut(duration: 0.08))
+                            .animation(.spring(response: 0.35, dampingFraction: 0.62)),
+                        removal: .scale(scale: 0.4, anchor: .bottom)
+                            .combined(with: .opacity)
+                            .animation(.spring(response: 0.25, dampingFraction: 0.7))
                     ))
-            } else if let cmd = command {
-                Divider()
-                    .opacity(0.12)
-                    .transition(.opacity.animation(.easeOut(duration: 0.1)))
-                if viewModel.commandMode == nil {
-                    JottCommandSuggestionBar(viewModel: viewModel)
-                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
-                    Divider().opacity(0.07)
                 }
-                if showingCreationPreview {
-                    ItemCreationPreviewCard(viewModel: viewModel)
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.easeIn(duration: 0.12)),
-                            removal:   .opacity.animation(.easeOut(duration: 0.08))
-                        ))
-                } else {
-                    JottCommandResults(command: cmd, viewModel: viewModel)
-                        .frame(height: 260)
+                if hasContent {
+                    // Format bar — floats left of Aa, morphs from it
+                    if showFormat {
+                        JottFormatBar(viewModel: viewModel)
+                            .background(barColor)
+                            .clipShape(Capsule())
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.3, anchor: .trailing)
+                                    .combined(with: .opacity)
+                                    .animation(.spring(response: 0.38, dampingFraction: 0.62)),
+                                removal: .scale(scale: 0.3, anchor: .trailing)
+                                    .combined(with: .opacity)
+                                    .animation(.spring(response: 0.25, dampingFraction: 0.72))
+                            ))
+                    }
+                    Button {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.65)) {
+                            showFormat.toggle()
+                        }
+                    } label: {
+                        Text("Aa")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(showFormat ? Color.accentColor : .primary.opacity(0.65))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(showFormat ? Color.accentColor.opacity(0.18) : barColor)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.4, anchor: .bottom)
+                            .combined(with: .opacity)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.62)),
+                        removal: .scale(scale: 0.4, anchor: .bottom)
+                            .combined(with: .opacity)
+                            .animation(.spring(response: 0.25, dampingFraction: 0.7))
+                    ))
+                }
+            }
+            .padding(.horizontal, 4)
+            .frame(height: (hasContent || isSaved) ? nil : 0)
+            .opacity((hasContent || isSaved) ? 1 : 0)
+            .animation(.spring(response: 0.38, dampingFraction: 0.7), value: hasContent || isSaved)
+
+            // The bar
+            VStack(spacing: 0) {
+                JottInputArea(viewModel: viewModel, showFormat: $showFormat)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if viewModel.isLinkAutocompleting && !viewModel.linkCandidates.isEmpty {
+                    Divider()
+                        .opacity(0.12)
+                        .transition(.opacity.animation(.easeOut(duration: 0.08)))
+                    NoteLinkAutocompleteView(viewModel: viewModel)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.97, anchor: .top)
                                 .combined(with: .opacity)
-                                .animation(.spring(response: 0.36, dampingFraction: 0.78).delay(0.05)),
-                            removal: .opacity.animation(.easeOut(duration: 0.1))
+                                .animation(.spring(response: 0.28, dampingFraction: 0.78)),
+                            removal: .opacity.animation(.easeOut(duration: 0.08))
                         ))
+                } else if let cmd = command {
+                    Divider()
+                        .opacity(0.12)
+                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                    if viewModel.commandMode == nil {
+                        JottCommandSuggestionBar(viewModel: viewModel)
+                            .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                        Divider().opacity(0.07)
+                    }
+                    if showingCreationPreview {
+                        ItemCreationPreviewCard(viewModel: viewModel)
+                            .transition(.asymmetric(
+                                insertion: .opacity.animation(.easeIn(duration: 0.12)),
+                                removal:   .opacity.animation(.easeOut(duration: 0.08))
+                            ))
+                    } else {
+                        JottCommandResults(command: cmd, viewModel: viewModel)
+                            .frame(height: 260)
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.97, anchor: .top)
+                                    .combined(with: .opacity)
+                                    .animation(.spring(response: 0.36, dampingFraction: 0.78).delay(0.05)),
+                                removal: .opacity.animation(.easeOut(duration: 0.1))
+                            ))
+                    }
                 }
             }
+            .clipped()
+            .background(viewModel.isDarkMode ? jottBarDark : jottBarLight)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .animation(
+                (viewModel.isLinkAutocompleting || command != nil)
+                    ? .spring(response: 0.36, dampingFraction: 0.82)
+                    : .easeOut(duration: 0.18),
+                value: viewModel.isLinkAutocompleting || command != nil
+            )
         }
-        .clipped()
-        .background(viewModel.isDarkMode ? jottBarDark : jottBarLight)
-        .animation(
-            (viewModel.isLinkAutocompleting || command != nil)
-                ? .spring(response: 0.36, dampingFraction: 0.82)
-                : .easeOut(duration: 0.18),
-            value: viewModel.isLinkAutocompleting || command != nil
-        )
     }
 }
 
@@ -193,9 +271,11 @@ func badgeInfo(for type: DetectedType, forced: Bool) -> TypeBadgeInfo? {
 
 struct JottInputArea: View {
     @ObservedObject var viewModel: OverlayViewModel
+    @Binding var showFormat: Bool
+    @ObservedObject private var speech = SpeechManager.shared
     @FocusState private var focused: Bool
-    @State private var showFormat = false
     @State private var textHeight: CGFloat = 20   // will be overwritten by reportHeight on first render
+    @State private var voicePrefix = ""
     private let maxTextHeight: CGFloat = 110
 
     var badge: TypeBadgeInfo? {
@@ -242,14 +322,6 @@ struct JottInputArea: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Format bar — slides down from top
-            if showFormat {
-                JottFormatBar(viewModel: viewModel)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .transition(.push(from: .top).combined(with: .opacity))
-            }
-
             HStack(alignment: .center, spacing: 10) {
 
                 // Type badge
@@ -286,24 +358,21 @@ struct JottInputArea: View {
             // Trailing controls as overlay — never affect row height
             .overlay(alignment: .trailing) {
                 VStack(alignment: .trailing, spacing: 4) {
-                    // Format toggle
-                    if !viewModel.inputText.isEmpty && !viewModel.inputText.hasPrefix("/") {
-                        Button {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                                showFormat.toggle()
+                    // Mic button
+                    Button(action: toggleVoice) {
+                        ZStack {
+                            if speech.isRecording {
+                                VoiceWaveformView(level: speech.audioLevel)
+                                    .frame(width: 28, height: 20)
+                            } else {
+                                Image(systemName: "microphone")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.secondary.opacity(0.45))
+                                    .frame(width: 24, height: 24)
                             }
-                        } label: {
-                            Image(systemName: showFormat ? "xmark" : "textformat")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(showFormat ? Color.accentColor.opacity(0.8) : .secondary.opacity(0.45))
-                                .frame(width: 24, height: 24)
-                                .background(showFormat ? Color.accentColor.opacity(0.1) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 5))
-                                .scaleEffect(showFormat ? 1.0 : 0.95)
                         }
-                        .buttonStyle(.plain)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
                     }
+                    .buttonStyle(.plain)
 
                     // Active tag filter indicator
                     if let tag = viewModel.activeTagFilter {
@@ -331,35 +400,27 @@ struct JottInputArea: View {
                             HStack(spacing: 3) {
                                 Image(systemName: "doc.on.clipboard")
                                     .font(.system(size: 10))
-                                    .foregroundColor(.secondary.opacity(0.55))
+                                    .foregroundColor(.secondary)
                                 Text("from clipboard")
                                     .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.secondary.opacity(0.4))
+                                    .foregroundColor(.secondary)
                                 Image(systemName: "xmark")
                                     .font(.system(size: 8, weight: .bold))
-                                    .foregroundColor(.secondary.opacity(0.35))
+                                    .foregroundColor(.secondary)
                             }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.secondary.opacity(0.12))
+                            .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
                         .transition(.scale(scale: 0.5, anchor: .trailing).combined(with: .opacity))
                     }
 
-                    // Saved indicator
-                    if viewModel.autoSaveStatus == "saved" {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(Color(red: 0.32, green: 0.78, blue: 0.54))
-                            Text("Saved")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary.opacity(0.4))
-                        }
-                        .transition(.scale(scale: 0.5, anchor: .trailing).combined(with: .opacity))
-                    }
                 }
-                .animation(.spring(response: 0.26, dampingFraction: 0.62), value: viewModel.autoSaveStatus)
                 .padding(.trailing, 14)
             }
+
         }
         .animation(.spring(response: 0.32, dampingFraction: 0.75), value: badge)
         .onAppear { focused = true }
@@ -369,11 +430,15 @@ struct JottInputArea: View {
                     focused = true
                     showFormat = false
                 }
+            } else {
+                speech.stopRecording()
+                voicePrefix = ""
             }
         }
     }
 
     private var placeholderText: String {
+        if speech.isRecording { return "listening..." }
         if let forced = viewModel.forcedType {
             switch forced {
             case .note:     return "what's on your mind..."
@@ -391,6 +456,67 @@ struct JottInputArea: View {
             }
         }
         return viewModel.inputText.hasPrefix("/") ? "" : "jott something down..."
+    }
+
+    private func toggleVoice() {
+        if speech.isRecording {
+            speech.stopRecording()
+        } else {
+            voicePrefix = viewModel.inputText
+            speech.startRecording(
+                onPartial: { partial in
+                    let joined = voicePrefix.isEmpty ? partial : voicePrefix + " " + partial
+                    viewModel.inputText = joined
+                },
+                onFinal: { final in
+                    let joined = voicePrefix.isEmpty ? final : voicePrefix + " " + final
+                    viewModel.inputText = joined
+                    voicePrefix = ""
+                }
+            )
+        }
+    }
+}
+
+// MARK: - Voice Waveform
+
+struct VoiceWaveformView: View {
+    let level: Float   // 0–1 from RMS
+
+    // Five bars with staggered idle-animation durations
+    private let durations: [Double] = [0.40, 0.28, 0.35, 0.22, 0.38]
+    private let multipliers: [CGFloat] = [0.55, 1.0, 0.75, 0.90, 0.60]
+
+    var body: some View {
+        HStack(spacing: 2.5) {
+            ForEach(0..<5, id: \.self) { i in
+                Bar(level: CGFloat(level),
+                    multiplier: multipliers[i],
+                    duration: durations[i])
+            }
+        }
+    }
+
+    struct Bar: View {
+        let level: CGFloat
+        let multiplier: CGFloat
+        let duration: Double
+        @State private var idle = false
+
+        // idle pulse height when quiet, grows with audio level
+        private var height: CGFloat {
+            let idleH: CGFloat = idle ? 5 : 2
+            return max(idleH, level * 14 * multiplier + 2)
+        }
+
+        var body: some View {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.red.opacity(0.75))
+                .frame(width: 2.5, height: height)
+                .animation(.easeInOut(duration: 0.12), value: level)
+                .animation(.easeInOut(duration: duration).repeatForever(autoreverses: true), value: idle)
+                .onAppear { idle = true }
+        }
     }
 }
 
@@ -1160,6 +1286,34 @@ final class JottNSTextView: NSTextView {
     var jottPlaceholder: String = ""
     var jottPlaceholderColor: NSColor = .placeholderTextColor
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command),
+              !event.modifierFlags.contains(.shift),
+              !event.modifierFlags.contains(.option) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch event.charactersIgnoringModifiers {
+        case "b": wrapSelection(with: "**"); return true
+        case "i": wrapSelection(with: "_");  return true
+        case "u": wrapSelection(with: "__"); return true
+        case "e": wrapSelection(with: "`");  return true   // Cmd+E → inline code
+        default:  return super.performKeyEquivalent(with: event)
+        }
+    }
+
+    private func wrapSelection(with marker: String) {
+        let sel = selectedRange()
+        if sel.length > 0 {
+            let selected = (string as NSString).substring(with: sel)
+            insertText("\(marker)\(selected)\(marker)", replacementRange: sel)
+        } else {
+            // No selection — insert paired markers and place cursor inside
+            let pos = sel.location
+            insertText("\(marker)\(marker)", replacementRange: sel)
+            setSelectedRange(NSRange(location: pos + marker.count, length: 0))
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty, !jottPlaceholder.isEmpty else { return }
@@ -1196,34 +1350,29 @@ struct JottFormatBar: View {
     @ObservedObject var viewModel: OverlayViewModel
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                fmtGroup {
-                    MFBtn("B", style: .bold)    { viewModel.inputText = "**\(viewModel.inputText)**" }
-                    MFBtn("I", style: .italic)  { viewModel.inputText = "*\(viewModel.inputText)*" }
-                    MFBtn("U", style: .plain)   { viewModel.inputText = "__\(viewModel.inputText)__" }
-                    MFBtn("S", style: .strike)  { viewModel.inputText = "~~\(viewModel.inputText)~~" }
-                }
-                fmtSep
-                fmtGroup {
-                    MFIcon("list.bullet")  { viewModel.inputText = "• " + viewModel.inputText }
-                    MFIcon("list.number")  { viewModel.inputText = "1. " + viewModel.inputText }
-                    MFIcon("text.quote")   { viewModel.inputText = "> " + viewModel.inputText }
-                }
-                fmtSep
-                fmtGroup {
-                    MFIcon("chevron.left.forwardslash.chevron.right") { viewModel.inputText = "`\(viewModel.inputText)`" }
-                    MFIcon("link")            { viewModel.inputText += " [text](url)" }
-                    MFIcon("textformat.size") { viewModel.inputText = "# " + viewModel.inputText }
-                }
+        HStack(spacing: 2) {
+            fmtGroup {
+                MFBtn("B", style: .bold)    { viewModel.inputText = "**\(viewModel.inputText)**" }
+                MFBtn("I", style: .italic)  { viewModel.inputText = "*\(viewModel.inputText)*" }
+                MFBtn("U", style: .plain)   { viewModel.inputText = "__\(viewModel.inputText)__" }
+                MFBtn("S", style: .strike)  { viewModel.inputText = "~~\(viewModel.inputText)~~" }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            fmtSep
+            fmtGroup {
+                MFIcon("list.bullet")  { viewModel.inputText = "• " + viewModel.inputText }
+                MFIcon("list.number")  { viewModel.inputText = "1. " + viewModel.inputText }
+                MFIcon("text.quote")   { viewModel.inputText = "> " + viewModel.inputText }
+            }
+            fmtSep
+            fmtGroup {
+                MFIcon("chevron.left.forwardslash.chevron.right") { viewModel.inputText = "`\(viewModel.inputText)`" }
+                MFIcon("link")            { viewModel.inputText += " [text](url)" }
+                MFIcon("textformat.size") { viewModel.inputText = "# " + viewModel.inputText }
+            }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.secondary.opacity(0.1))
-        )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .fixedSize()
     }
 
     private func fmtGroup<Content: View>(@ViewBuilder _ c: () -> Content) -> some View {

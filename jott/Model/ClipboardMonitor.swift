@@ -9,6 +9,7 @@ final class ClipboardMonitor {
     static let shared = ClipboardMonitor()
 
     private(set) var pendingText: String?
+    private var pendingTextDate: Date?
     private var lastChangeCount: Int
     private var timer: Timer?
 
@@ -30,16 +31,27 @@ final class ClipboardMonitor {
         lastChangeCount = pb.changeCount
         if let text = pb.string(forType: .string), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             pendingText = text
+            pendingTextDate = Date()
         }
     }
 
-    /// Returns and clears the pending clipboard text.
+    /// Returns and clears pending text only if it was copied within the last 60 seconds.
     func consume() -> String? {
-        let t = pendingText
+        guard let t = pendingText,
+              let date = pendingTextDate,
+              Date().timeIntervalSince(date) < 60 else {
+            pendingText = nil
+            pendingTextDate = nil
+            return nil
+        }
         pendingText = nil
+        pendingTextDate = nil
         return t
     }
 
     /// Clears without returning.
-    func clear() { pendingText = nil }
+    func clear() {
+        pendingText = nil
+        pendingTextDate = nil
+    }
 }
