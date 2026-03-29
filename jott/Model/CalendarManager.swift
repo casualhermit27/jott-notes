@@ -8,18 +8,84 @@ final class CalendarManager: ObservableObject {
     static let shared = CalendarManager()
     private let store = EKEventStore()
     @Published var isAuthorized = false
+    @Published var isRemindersAuthorized = false
+
+    // MARK: - Calendar/Reminders list selection (persisted)
+    @Published var selectedCalendarId: String? = UserDefaults.standard.string(forKey: "jott_calendarId")
+    @Published var selectedReminderListId: String? = UserDefaults.standard.string(forKey: "jott_reminderListId")
+
+    var availableCalendars: [EKCalendar] {
+        store.calendars(for: .event).filter { $0.allowsContentModifications }
+    }
+    var availableReminderLists: [EKCalendar] {
+        store.calendars(for: .reminder).filter { $0.allowsContentModifications }
+    }
+
+    func selectCalendar(_ id: String?) {
+        selectedCalendarId = id
+        UserDefaults.standard.set(id, forKey: "jott_calendarId")
+    }
+    func selectReminderList(_ id: String?) {
+        selectedReminderListId = id
+        UserDefaults.standard.set(id, forKey: "jott_reminderListId")
+    }
+
+    private static func isGranted(_ status: EKAuthorizationStatus) -> Bool {
+        if #available(macOS 14, *) { return status == .fullAccess }
+        return status == .authorized
+    }
 
     private init() {
-        let status = EKEventStore.authorizationStatus(for: .event)
-        isAuthorized = (status == .fullAccess)
+        isAuthorized       = Self.isGranted(EKEventStore.authorizationStatus(for: .event))
+        isRemindersAuthorized = Self.isGranted(EKEventStore.authorizationStatus(for: .reminder))
     }
 
     func requestAccess() async {
         guard !isAuthorized else { return }
-        do {
-            let granted = try await store.requestFullAccessToEvents()
-            isAuthorized = granted
-        } catch { isAuthorized = false }
+        if #available(macOS 14, *) {
+            do { isAuthorized = try await store.requestFullAccessToEvents() }
+            catch { isAuthorized = false }
+        } else {
+            await withCheckedContinuation { cont in
+                store.requestAccess(to: .event) { [weak self] granted, _ in
+                    Task { @MainActor [weak self] in
+                        self?.isAuthorized = granted
+                        cont.resume()
+                    }
+                }
+            }
+        }
+    }
+
+    func requestRemindersAccess() async {
+        guard !isRemindersAuthorized else { return }
+        if #available(macOS 14, *) {
+            do { isRemindersAuthorized = try await store.requestFullAccessToReminders() }
+            catch { isRemindersAuthorized = false }
+        } else {
+            await withCheckedContinuation { cont in
+                store.requestAccess(to: .reminder) { [weak self] granted, _ in
+                    Task { @MainActor [weak self] in
+                        self?.isRemindersAuthorized = granted
+                        cont.resume()
+                    }
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func createReminder(title: String, dueDate: Date, recurrence: ParsedRecurrence? = nil) -> Bool {
+        guard isRemindersAuthorized else { return false }
+        let ekReminder = EKReminder(eventStore: store)
+        ekReminder.title = title
+        ekReminder.calendar = availableReminderLists.first { $0.calendarIdentifier == selectedReminderListId }
+            ?? store.defaultCalendarForNewReminders()
+        ekReminder.dueDateComponents = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute], from: dueDate)
+        ekReminder.addAlarm(EKAlarm(absoluteDate: dueDate))
+        if let rec = recurrence { ekReminder.recurrenceRules = [makeRecurrenceRule(rec)] }
+        do { try store.save(ekReminder, commit: true); return true } catch { return false }
     }
 
     func upcomingEvents(days: Int = 7) -> [EKEvent] {
@@ -48,7 +114,8 @@ final class CalendarManager: ObservableObject {
         event.title = title
         event.startDate = startDate
         event.endDate = startDate.addingTimeInterval(TimeInterval(durationMinutes * 60))
-        event.calendar = store.defaultCalendarForNewEvents
+        event.calendar = availableCalendars.first { $0.calendarIdentifier == selectedCalendarId }
+            ?? store.defaultCalendarForNewEvents
         if let rec = recurrence {
             event.recurrenceRules = [makeRecurrenceRule(rec)]
         }

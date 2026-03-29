@@ -19,12 +19,12 @@ final class OverlayViewModel: ObservableObject {
             stripCreationPrefixIfNeeded()   // strip /note , /reminder , /meeting  → sets forcedTypeOverride
             detectType()
             updateCommandSelectionIfNeeded()
-            scheduleAutoSave()
         }
     }
     @Published var isVisible: Bool = false
     @Published var detectedType: DetectedType = .note
-    @Published var autoSaveStatus: String = ""   // "" | "saved"
+    @Published var autoSaveStatus: String = ""   // "" | contextual message
+    @Published var feedbackIcon: String = "checkmark.circle.fill"
     @Published var isDarkMode: Bool = false
     @Published var filterType: FilterType = .all
 
@@ -45,8 +45,11 @@ final class OverlayViewModel: ObservableObject {
 
     /// Stable ID for the current open session's note
     private var sessionNoteId: UUID?
-    private var autoSaveTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
+
+    /// When the panel was last dismissed with content — used for grace-period restore
+    private var lastDismissDate: Date?
+    private let gracePeriod: TimeInterval = 5 * 60   // 5 minutes
 
     // MARK: - Calendar
     let calendarManager = CalendarManager.shared
@@ -113,25 +116,14 @@ final class OverlayViewModel: ObservableObject {
     }
 
     // MARK: - Session-based auto-save (debounced 0.6s)
-    private func scheduleAutoSave() {
-        guard commandMode == nil else { return }
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let allowable = !text.hasPrefix("/") || isForcedCreationMode
-        guard !text.isEmpty, allowable else { return }
-
-        autoSaveTask?.cancel()
-        autoSaveTask = Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard !Task.isCancelled else { return }
-            commitSession()
-            showSavedIndicator()
-        }
-    }
-
     /// Saves (or updates) the single note for this open session
     private func commitSession() {
         let raw = inputText.trimmingCharacters(in: .whitespaces)
         guard !raw.isEmpty else { return }
+
+        let timeFmt: DateFormatter = {
+            let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
+        }()
 
         // Forced type — inputText is already the clean content (prefix was stripped on input)
         if let forced = forcedTypeOverride {
@@ -143,34 +135,79 @@ final class OverlayViewModel: ObservableObject {
 
             switch forced {
             case .note:
+                // Check for checklist first
+                if let items = NaturalLanguageParser.detectChecklist(text) {
+                    let mdText = items.map { "- \($0)" }.joined(separator: "\n")
+                    store.upsertNote(Note(id: id, text: mdText))
+                    showFeedback("Checklist · \(items.count) items", icon: "checklist")
+                    return
+                }
                 let parsed = NaturalLanguageParser.parse(text)
                 if case .note(let t, let tags) = parsed {
                     store.upsertNote(Note(id: id, text: t, tags: tags))
                 } else {
                     store.upsertNote(Note(id: id, text: text))
                 }
+                showFeedback("Note saved", icon: "note.text")
             case .reminder:
                 let parsed = NaturalLanguageParser.parse(text)
+                let rec = NaturalLanguageParser.extractRecurrence(from: text)
                 if case .reminder(let t, let d, let tags) = parsed {
                     let r = Reminder(text: t, dueDate: d, tags: tags)
                     store.saveReminder(r); NotificationManager.shared.scheduleReminder(r)
+                    let timeStr = timeFmt.string(from: d)
+                    if calendarManager.createReminder(title: t, dueDate: d, recurrence: rec) {
+                        showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                    } else {
+                        showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
+                    }
                 } else {
                     let d = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     let r = Reminder(text: text, dueDate: d, tags: [])
                     store.saveReminder(r); NotificationManager.shared.scheduleReminder(r)
+                    let timeStr = timeFmt.string(from: d)
+                    if calendarManager.createReminder(title: text, dueDate: d, recurrence: rec) {
+                        showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                    } else {
+                        showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
+                    }
                 }
             case .meeting:
                 let parsed = NaturalLanguageParser.parse(text)
+                let rec = NaturalLanguageParser.extractRecurrence(from: text)
                 if case .meeting(let title, let participants, let startTime, let tags) = parsed {
                     store.saveMeeting(Meeting(title: title, participants: participants, startTime: startTime, tags: tags))
+                    let timeStr = timeFmt.string(from: startTime)
+                    if calendarManager.createEvent(title: title, startDate: startTime, recurrence: rec) {
+                        showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
+                    } else {
+                        showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
+                    }
                 } else {
-                    store.saveMeeting(Meeting(title: text, participants: [], startTime: Date(), tags: []))
+                    let startTime = Date()
+                    store.saveMeeting(Meeting(title: text, participants: [], startTime: startTime, tags: []))
+                    let timeStr = timeFmt.string(from: startTime)
+                    if calendarManager.createEvent(title: text, startDate: startTime, recurrence: rec) {
+                        showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
+                    } else {
+                        showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
+                    }
                 }
             }
             return
         }
 
         guard !raw.hasPrefix("/") else { return }
+
+        // Check for checklist before NLP parse
+        if let items = NaturalLanguageParser.detectChecklist(raw) {
+            let id = sessionNoteId ?? UUID()
+            sessionNoteId = id
+            let mdText = items.map { "- \($0)" }.joined(separator: "\n")
+            store.upsertNote(Note(id: id, text: mdText))
+            showFeedback("Checklist · \(items.count) items", icon: "checklist")
+            return
+        }
 
         let id = sessionNoteId ?? UUID()
         sessionNoteId = id
@@ -180,22 +217,38 @@ final class OverlayViewModel: ObservableObject {
         case .note(let noteText, let tags):
             store.upsertNote(Note(id: id, text: noteText, tags: tags))
             resolveWikiLinks(noteId: id, text: noteText)
+            showFeedback("Note saved", icon: "note.text")
 
         case .reminder(let reminderText, let dueDate, let tags):
             let reminder = Reminder(text: reminderText, dueDate: dueDate, tags: tags)
             store.saveReminder(reminder)
             NotificationManager.shared.scheduleReminder(reminder)
+            let rec = NaturalLanguageParser.extractRecurrence(from: raw)
+            let timeStr = timeFmt.string(from: dueDate)
+            if calendarManager.createReminder(title: reminderText, dueDate: dueDate, recurrence: rec) {
+                showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+            } else {
+                showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
+            }
 
         case .meeting(let title, let participants, let startTime, let tags):
             store.saveMeeting(Meeting(title: title, participants: participants, startTime: startTime, tags: tags))
+            let rec = NaturalLanguageParser.extractRecurrence(from: raw)
+            let timeStr = timeFmt.string(from: startTime)
+            if calendarManager.createEvent(title: title, startDate: startTime, recurrence: rec) {
+                showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
+            } else {
+                showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
+            }
         }
     }
 
-    private func showSavedIndicator() {
+    func showFeedback(_ message: String, icon: String = "checkmark.circle.fill") {
         statusTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.25)) { autoSaveStatus = "saved" }
+        feedbackIcon = icon
+        withAnimation(.easeInOut(duration: 0.25)) { autoSaveStatus = message }
         statusTask = Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.5)) { autoSaveStatus = "" }
         }
@@ -203,18 +256,28 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Lifecycle
     func show() {
-        autoSaveStatus = ""
-        if !inputText.isEmpty {
+        commandMode = nil
+
+        // Grace-period restore: if dismissed recently with content, bring it back
+        if let dismissed = lastDismissDate,
+           Date().timeIntervalSince(dismissed) < gracePeriod,
+           !inputText.isEmpty {
+            // Still within grace period — show saved confirmation then let user continue
+            showFeedback("Note saved", icon: "note.text")
             isVisible = true
             return
         }
-        forcedTypeOverride = nil
+
+        // Grace period expired or no prior session — fresh start
+        lastDismissDate = nil
         sessionNoteId = nil
+        forcedTypeOverride = nil
         selectedNote = nil
         selectedReminder = nil
         selectedMeeting = nil
         isEditingNote = false
-        // Clipboard watch: pre-fill if user just copied something
+        autoSaveStatus = ""
+
         if let copied = ClipboardMonitor.shared.consume() {
             inputText = copied
             clipboardPrefilled = true
@@ -226,14 +289,21 @@ final class OverlayViewModel: ObservableObject {
     }
 
     func dismiss() {
-        autoSaveTask?.cancel()
         commandMode = nil
         commandModeDateOverride = nil
-        // Save whatever is typed right now (if non-empty)
+
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty && (!text.hasPrefix("/") || isForcedCreationMode) {
+            // Save on close — this is the only save trigger for plain notes
             commitSession()
+            lastDismissDate = Date()
+        } else {
+            // Nothing to save — full reset
+            lastDismissDate = nil
+            sessionNoteId = nil
+            inputText = ""
         }
+
         isVisible = false
         selectedNote = nil
         selectedReminder = nil
@@ -245,8 +315,25 @@ final class OverlayViewModel: ObservableObject {
     func toggle() { isVisible ? dismiss() : show() }
     func handleEscape() { dismiss() }
 
+    /// True when user is in a command mode but has started typing "/" to switch to another command
+    var isTypingNewCommand: Bool {
+        commandMode != nil && inputText.hasPrefix("/") && !isForcedCreationMode
+    }
+
     var currentCommand: JottCommand? {
         if let mode = commandMode {
+            // If typing a new "/" command, show current mode results with empty query
+            // (so the list stays useful while the suggestion bar offers the switch)
+            if isTypingNewCommand {
+                switch mode {
+                case .notes:     return .notes(query: "")
+                case .reminders: return .reminders(query: "")
+                case .meetings:  return .meetings(query: "")
+                case .inbox:     return .inbox
+                case .today:     return .today
+                default:         return mode
+                }
+            }
             switch mode {
             case .notes:     return .notes(query: inputText)
             case .reminders: return .reminders(query: inputText)
@@ -283,6 +370,22 @@ final class OverlayViewModel: ObservableObject {
             return []
         case .calendar:
             return []
+        case .inbox:
+            let notes = getAllNotes().map { TimelineItem.note($0) }
+            let reminders = getAllReminders().map { TimelineItem.reminder($0) }
+            let meetings = getAllMeetings().map { TimelineItem.meeting($0) }
+            return (notes + reminders + meetings).sorted { $0.date > $1.date }
+        case .today:
+            let cal = Calendar.current
+            let todayReminders = getAllReminders()
+                .filter { !$0.isCompleted && cal.isDateInToday($0.dueDate) }
+                .sorted { $0.dueDate < $1.dueDate }
+                .map { TimelineItem.reminder($0) }
+            let todayMeetings = getAllMeetings()
+                .filter { cal.isDateInToday($0.startTime) }
+                .sorted { $0.startTime < $1.startTime }
+                .map { TimelineItem.meeting($0) }
+            return (todayReminders + todayMeetings)
         }
     }
 
@@ -594,20 +697,31 @@ final class OverlayViewModel: ObservableObject {
 
     /// Returns preview info when commandMode supports creation and inputText is non-empty.
     func commandCreationPreview() -> (title: String, date: Date, hasDate: Bool, recurrence: ParsedRecurrence?)? {
-        guard let mode = commandMode else { return nil }
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
-        switch mode {
-        case .calendar, .meetings, .reminders:
-            let result = NaturalLanguageParser.parseForEvent(from: text)
-            let rec    = NaturalLanguageParser.extractRecurrence(from: text)
-            // Date picker override takes priority over NLP result
-            let date   = commandModeDateOverride ?? result.date
-            let hasDate = commandModeDateOverride != nil || result.hasExplicitDate
-            return (title: result.title, date: date, hasDate: hasDate, recurrence: rec)
-        default:
+
+        // Resolve which mode to preview for
+        let isDateMode: Bool
+        if let mode = commandMode {
+            switch mode {
+            case .calendar, .meetings, .reminders: isDateMode = true
+            default: return nil
+            }
+        } else if let forced = forcedType {
+            switch forced {
+            case .reminder, .meeting: isDateMode = true
+            default: return nil
+            }
+        } else {
             return nil
         }
+
+        guard isDateMode else { return nil }
+        let result  = NaturalLanguageParser.parseForEvent(from: text)
+        let rec     = NaturalLanguageParser.extractRecurrence(from: text)
+        let date    = commandModeDateOverride ?? result.date
+        let hasDate = commandModeDateOverride != nil || result.hasExplicitDate
+        return (title: result.title, date: date, hasDate: hasDate, recurrence: rec)
     }
 
     @discardableResult
@@ -619,27 +733,163 @@ final class OverlayViewModel: ObservableObject {
         let rec    = NaturalLanguageParser.extractRecurrence(from: text)
         let date   = commandModeDateOverride ?? result.date
 
+        let timeFmt: DateFormatter = {
+            let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
+        }()
+        let timeStr = timeFmt.string(from: date)
+
         switch mode {
         case .calendar:
             let ok = calendarManager.createEvent(title: result.title, startDate: date, recurrence: rec)
-            if ok { inputText = ""; commandMode = nil; showSavedIndicator() }
+            if ok {
+                inputText = ""; commandMode = nil
+                showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
+            }
             return ok
         case .meetings:
             let recLabel = rec.map { " (\($0.label))" } ?? ""
             store.saveMeeting(Meeting(title: result.title + recLabel, participants: [], startTime: date, tags: []))
-            inputText = ""; commandMode = nil; showSavedIndicator()
+            inputText = ""; commandMode = nil
+            let calOk = calendarManager.createEvent(title: result.title + recLabel, startDate: date, recurrence: rec)
+            if calOk {
+                showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
+            } else {
+                showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
+            }
             objectWillChange.send()
             return true
         case .reminders:
             let r = Reminder(text: result.title, dueDate: date, tags: [])
             store.saveReminder(r)
             NotificationManager.shared.scheduleReminder(r)
-            inputText = ""; commandMode = nil; showSavedIndicator()
+            inputText = ""; commandMode = nil
+            if calendarManager.createReminder(title: result.title, dueDate: date, recurrence: rec) {
+                showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+            } else {
+                showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
+            }
             objectWillChange.send()
             return true
         default:
             return false
         }
+    }
+
+    /// Unified creation — works for both commandMode and forcedType (Enter key handler).
+    /// Saves, shows feedback, clears input for next entry — does NOT dismiss.
+    func createCurrentItem() {
+        if commandMode != nil {
+            createFromCommandMode()
+            return
+        }
+        guard let forced = forcedTypeOverride else { return }
+        let text = inputText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+
+        let timeFmt: DateFormatter = {
+            let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
+        }()
+
+        switch forced {
+        case .reminder:
+            let result = NaturalLanguageParser.parseForEvent(from: text)
+            let rec    = NaturalLanguageParser.extractRecurrence(from: text)
+            let date   = commandModeDateOverride ?? result.date
+            let r = Reminder(text: result.title, dueDate: date, tags: [])
+            store.saveReminder(r)
+            NotificationManager.shared.scheduleReminder(r)
+            if calendarManager.createReminder(title: result.title, dueDate: date, recurrence: rec) {
+                showFeedback("Reminder → Apple Reminders · \(timeFmt.string(from: date))", icon: "bell.fill")
+            } else {
+                showFeedback("Reminder set · \(timeFmt.string(from: date))", icon: "bell.fill")
+            }
+        case .meeting:
+            let result = NaturalLanguageParser.parseForEvent(from: text)
+            let rec    = NaturalLanguageParser.extractRecurrence(from: text)
+            let date   = commandModeDateOverride ?? result.date
+            store.saveMeeting(Meeting(title: result.title, participants: [], startTime: date, tags: []))
+            if calendarManager.createEvent(title: result.title, startDate: date, recurrence: rec) {
+                showFeedback("Event → Apple Calendar · \(timeFmt.string(from: date))", icon: "calendar")
+            } else {
+                showFeedback("Meeting saved · \(timeFmt.string(from: date))", icon: "calendar")
+            }
+        case .note:
+            commitSession()
+            showFeedback("Note saved", icon: "note.text")
+        }
+
+        // Reset for next entry — stay open
+        sessionNoteId = nil
+        commandModeDateOverride = nil
+        inputText = ""
+        objectWillChange.send()
+    }
+
+    // MARK: - Smart Recall
+    var smartRecallResults: [TimelineItem] {
+        guard commandMode == nil,
+              !isForcedCreationMode,
+              !inputText.hasPrefix("/"),
+              inputText.count >= 2 else { return [] }
+        let q = inputText.lowercased()
+        var results: [TimelineItem] = []
+        let matchingNotes = getAllNotes().filter { $0.text.lowercased().contains(q) }
+        let matchingReminders = getAllReminders().filter { $0.text.lowercased().contains(q) }
+        let matchingMeetings = getAllMeetings().filter { $0.title.lowercased().contains(q) }
+        results += matchingNotes.prefix(3).map { .note($0) }
+        results += matchingReminders.prefix(2).map { .reminder($0) }
+        results += matchingMeetings.prefix(2).map { .meeting($0) }
+        return Array(results.prefix(5))
+    }
+
+    var isSmartRecalling: Bool { !smartRecallResults.isEmpty }
+
+    // MARK: - Quick Complete
+    func markReminderDone(_ id: UUID) {
+        store.toggleReminder(id)
+        objectWillChange.send()
+    }
+
+    // MARK: - Inline Editing
+    @Published var inlineEditingId: UUID? = nil
+    @Published var inlineEditText: String = ""
+
+    func startInlineEdit() {
+        let items = currentCommandItems().isEmpty ? smartRecallResults : currentCommandItems()
+        guard !items.isEmpty else { return }
+        let idx = max(0, min(selectedCommandIndex, items.count - 1))
+        switch items[idx] {
+        case .note(let n):
+            inlineEditingId = n.id
+            inlineEditText = n.text.components(separatedBy: "\n").first ?? n.text
+        default:
+            break // only notes support inline edit for now
+        }
+    }
+
+    func saveInlineEdit() {
+        guard let id = inlineEditingId else { return }
+        let newText = inlineEditText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newText.isEmpty else { cancelInlineEdit(); return }
+        if var note = store.note(for: id) {
+            // Replace just the first line
+            let lines = note.text.components(separatedBy: "\n")
+            if lines.count > 1 {
+                note.text = ([newText] + lines.dropFirst()).joined(separator: "\n")
+            } else {
+                note.text = newText
+            }
+            note.modifiedAt = Date()
+            store.upsertNote(note)
+        }
+        inlineEditingId = nil
+        inlineEditText = ""
+        objectWillChange.send()
+    }
+
+    func cancelInlineEdit() {
+        inlineEditingId = nil
+        inlineEditText = ""
     }
 
     // MARK: - Dynamic panel sizing

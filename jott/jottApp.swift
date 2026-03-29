@@ -18,6 +18,15 @@ struct jottApp: App {
         MenuBarExtra("jott", image: "JottMenuBar") {
             MenuBarContentView(appDelegate: appDelegate, menuBarStore: menuBarStore)
         }
+        .menuBarExtraStyle(.window)
+
+        Window("Jott Settings", id: "jott-settings") {
+            JottSettingsView()
+                .frame(minWidth: 380, minHeight: 280)
+        }
+        .windowStyle(.titleBar)
+        .windowResizability(.contentSize)
+        .defaultSize(width: 420, height: 320)
     }
 }
 
@@ -26,61 +35,81 @@ struct jottApp: App {
 struct MenuBarContentView: View {
     let appDelegate: AppDelegate
     @ObservedObject var menuBarStore: MenuBarStore
+    @Environment(\.openWindow) private var openWindow
+
+    private let menuWidth: CGFloat = 320
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            VStack(spacing: 4) {
+            HStack {
                 Text("Jott")
-                    .font(.headline)
-                if let version = Bundle.main.appVersion {
-                    Text("v\(version)")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button(action: { appDelegate.windowController?.toggle() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 9, weight: .medium))
+                        Text("⌥ Space")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.1))
+                    .clipShape(Capsule())
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 10)
             .padding(.horizontal, 14)
+            .padding(.vertical, 10)
 
-            // Recent notes
             if !menuBarStore.recentNotes.isEmpty {
                 Divider()
 
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("RECENT")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .tracking(0.5)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 8)
-                        .padding(.bottom, 4)
+                Text("RECENT")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
 
-                    ForEach(menuBarStore.recentNotes) { note in
-                        Button(action: {
-                            appDelegate.windowController?.openNote(note)
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "note.text")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 16)
-                                Text(note.text.components(separatedBy: "\n").first ?? note.text)
-                                    .font(.system(size: 12))
-                                    .lineLimit(1)
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                Text(shortDate(note.modifiedAt))
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .contentShape(Rectangle())
+                ForEach(menuBarStore.recentNotes) { note in
+                    Button(action: { appDelegate.windowController?.openNote(note) }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "note.text")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .frame(width: 16)
+                            Text(note.text.components(separatedBy: "\n").first ?? note.text)
+                                .font(.system(size: 12))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .foregroundColor(.primary)
+                                .frame(width: menuWidth - 110, alignment: .leading)
+                            Spacer(minLength: 0)
+                            Text(shortDate(note.modifiedAt))
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .frame(width: menuWidth - 28)
+                        .padding(.vertical, 5)
                     }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 14)
                 }
-                .padding(.bottom, 4)
+
+                Button(action: { appDelegate.windowController?.openAllNotes() }) {
+                    Text("All Notes (\(menuBarStore.totalCount))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
             }
 
             Divider()
@@ -93,9 +122,11 @@ struct MenuBarContentView: View {
                     Image(systemName: menuBarStore.isDarkMode ? "sun.max" : "moon")
                     Text(menuBarStore.isDarkMode ? "Light Mode" : "Dark Mode")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
-            .padding()
 
             Divider()
 
@@ -104,19 +135,38 @@ struct MenuBarContentView: View {
                     Image(systemName: "folder")
                     Text("Choose Notes Folder...")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
-            .padding()
+
+            Button(action: { openWindow(id: "jott-settings") }) {
+                HStack {
+                    Image(systemName: "gear")
+                    Text("Settings...")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
 
             Divider()
 
-            Button("Quit") {
-                NSApp.terminate(nil)
+            Button(action: { NSApp.terminate(nil) }) {
+                Text("Quit")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
-            .padding()
         }
-        .onAppear { menuBarStore.refresh() }
+        .frame(width: menuWidth)
+        .onAppear {
+            menuBarStore.refresh()
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     private func shortDate(_ date: Date) -> String {
@@ -138,10 +188,13 @@ struct MenuBarContentView: View {
 @MainActor
 final class MenuBarStore: ObservableObject {
     @Published var recentNotes: [Note] = []
+    @Published var totalCount: Int = 0
     @Published var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "jott_darkMode")
 
     func refresh() {
-        recentNotes = Array(NoteStore.shared.allNotes().prefix(3))
+        let all = NoteStore.shared.allNotes()
+        recentNotes = Array(all.prefix(3))
+        totalCount = all.count
         isDarkMode = UserDefaults.standard.bool(forKey: "jott_darkMode")
     }
 }
@@ -174,6 +227,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             await NotificationManager.shared.requestPermission()
             await CalendarManager.shared.requestAccess()
+            await CalendarManager.shared.requestRemindersAccess()
         }
     }
 }

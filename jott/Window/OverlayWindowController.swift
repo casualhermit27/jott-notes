@@ -84,4 +84,9 @@ class OverlayWindowController {
         viewModel.show()
         viewModel.selectedNote = note
     }
+
+    func openAllNotes() {
+        viewModel.show()
+        viewModel.activateCommandMode(.notes(query: ""))
+    }
 }

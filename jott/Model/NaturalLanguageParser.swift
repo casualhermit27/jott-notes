@@ -356,6 +356,27 @@ struct NaturalLanguageParser {
         return cal.date(from: comps)
     }
 
+    // MARK: - Checklist detection
+
+    /// Returns an array of checklist items if the input looks like a comma-separated list.
+    /// Conditions: 2+ items, all items ≤ 5 words, no reminder/meeting trigger words.
+    static func detectChecklist(_ input: String) -> [String]? {
+        let triggerWords = ["remind me", "remember to", "don't forget",
+                            "meeting with", "call with", "sync with", "standup", "@"]
+        let low = input.lowercased()
+        for word in triggerWords where low.contains(word) { return nil }
+
+        let items = input.components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard items.count >= 2 else { return nil }
+        for item in items {
+            let wordCount = item.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
+            if wordCount > 5 { return nil }
+        }
+        return items
+    }
+
     /// Parses plain event text ("Team lunch tomorrow at 3pm") into title + date.
     /// Combines day keyword + time so "tomorrow at 3pm" = day+1 at 3pm.
     static func parseForEvent(from text: String) -> (title: String, date: Date, hasExplicitDate: Bool) {

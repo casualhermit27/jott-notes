@@ -63,15 +63,17 @@ struct JottCaptureView: View {
     }
 
     var showingCreationPreview: Bool {
-        guard viewModel.commandMode != nil, !viewModel.inputText.isEmpty else { return false }
+        guard !viewModel.inputText.isEmpty,
+              !viewModel.isTypingNewCommand else { return false }
         return viewModel.commandCreationPreview() != nil
     }
 
     var body: some View {
         let hasContent = !viewModel.inputText.isEmpty && !viewModel.inputText.hasPrefix("/")
-        let isSaved = viewModel.autoSaveStatus == "saved"
+        let isSaved = !viewModel.autoSaveStatus.isEmpty
 
-        let barColor = viewModel.isDarkMode ? jottBarDark : jottBarLight
+        let barColor    = viewModel.isDarkMode ? jottBarDark : jottBarLight
+        let borderColor = viewModel.isDarkMode ? Color.white.opacity(0.10) : Color.black.opacity(0.09)
 
         VStack(spacing: 4) {
             // Floating toolbar — bubbles up above the bar
@@ -79,17 +81,19 @@ struct JottCaptureView: View {
                 Spacer()
                 if isSaved {
                     HStack(spacing: 3) {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: viewModel.feedbackIcon)
                             .font(.system(size: 9))
                             .foregroundColor(Color(red: 0.32, green: 0.78, blue: 0.54))
-                        Text("Saved")
+                        Text(viewModel.autoSaveStatus)
                             .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.primary.opacity(0.65))
+                            .lineLimit(1)
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(barColor)
                     .clipShape(Capsule())
+                    .overlay(Capsule().strokeBorder(borderColor, lineWidth: 1))
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.4, anchor: .bottom)
                             .combined(with: .opacity)
@@ -105,6 +109,7 @@ struct JottCaptureView: View {
                         JottFormatBar(viewModel: viewModel)
                             .background(barColor)
                             .clipShape(Capsule())
+                            .overlay(Capsule().strokeBorder(borderColor, lineWidth: 1))
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.3, anchor: .trailing)
                                     .combined(with: .opacity)
@@ -126,6 +131,7 @@ struct JottCaptureView: View {
                             .padding(.vertical, 5)
                             .background(showFormat ? Color.accentColor.opacity(0.18) : barColor)
                             .clipShape(Capsule())
+                            .overlay(Capsule().strokeBorder(showFormat ? Color.accentColor.opacity(0.25) : borderColor, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .transition(.asymmetric(
@@ -159,11 +165,29 @@ struct JottCaptureView: View {
                                 .animation(.spring(response: 0.28, dampingFraction: 0.78)),
                             removal: .opacity.animation(.easeOut(duration: 0.08))
                         ))
+                } else if viewModel.isForcedCreationMode && showingCreationPreview {
+                    Divider()
+                        .opacity(0.12)
+                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                    ItemCreationPreviewCard(viewModel: viewModel)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeIn(duration: 0.12)),
+                            removal:   .opacity.animation(.easeOut(duration: 0.08))
+                        ))
+                } else if viewModel.isSmartRecalling {
+                    Divider()
+                        .opacity(0.12)
+                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
+                    SmartRecallView(viewModel: viewModel)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeIn(duration: 0.12)),
+                            removal: .opacity.animation(.easeOut(duration: 0.08))
+                        ))
                 } else if let cmd = command {
                     Divider()
                         .opacity(0.12)
                         .transition(.opacity.animation(.easeOut(duration: 0.1)))
-                    if viewModel.commandMode == nil {
+                    if viewModel.commandMode == nil || viewModel.isTypingNewCommand {
                         JottCommandSuggestionBar(viewModel: viewModel)
                             .transition(.opacity.animation(.easeOut(duration: 0.1)))
                         Divider().opacity(0.07)
@@ -176,7 +200,7 @@ struct JottCaptureView: View {
                             ))
                     } else {
                         JottCommandResults(command: cmd, viewModel: viewModel)
-                            .frame(height: 260)
+                            .frame(height: (cmd == .open || cmd == .today) ? nil : 260)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.97, anchor: .top)
                                     .combined(with: .opacity)
@@ -189,6 +213,10 @@ struct JottCaptureView: View {
             .clipped()
             .background(viewModel.isDarkMode ? jottBarDark : jottBarLight)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(borderColor, lineWidth: 1)
+            )
             .animation(
                 (viewModel.isLinkAutocompleting || command != nil)
                     ? .spring(response: 0.36, dampingFraction: 0.82)
@@ -208,11 +236,14 @@ enum JottCommand: Equatable {
     case search(query: String)
     case open
     case calendar
+    case inbox
+    case today
 
     init?(input: String) {
         guard input.hasPrefix("/") else { return nil }
         let raw = input.dropFirst()
         let trimmed = raw.lowercased().trimmingCharacters(in: .whitespaces)
+        if trimmed == "today" || trimmed == "t" { self = .today; return }
         if trimmed.isEmpty || trimmed == "notes" || trimmed.hasPrefix("notes ") {
             let q = trimmed.hasPrefix("notes ") ? String(raw.dropFirst(6)).trimmingCharacters(in: .whitespaces) : ""
             self = .notes(query: q)
@@ -228,6 +259,8 @@ enum JottCommand: Equatable {
             self = .meetings(query: q)
         } else if trimmed.hasPrefix("search ") {
             self = .search(query: String(raw.dropFirst(7)).trimmingCharacters(in: .whitespaces))
+        } else if trimmed == "inbox" || trimmed == "i" {
+            self = .inbox
         } else {
             self = .notes(query: String(raw))
         }
@@ -312,6 +345,12 @@ struct JottInputArea: View {
         case .search:
             return TypeBadgeInfo(label: "Search", bg: Color(red: 0.92, green: 0.92, blue: 0.95),
                                  fg: Color(red: 0.30, green: 0.30, blue: 0.42), icon: "magnifyingglass")
+        case .inbox:
+            return TypeBadgeInfo(label: "Inbox", bg: Color(red: 0.92, green: 0.92, blue: 0.95),
+                                 fg: Color(red: 0.30, green: 0.30, blue: 0.42), icon: "tray")
+        case .today:
+            return TypeBadgeInfo(label: "Today", bg: Color.yellow.opacity(0.2),
+                                 fg: Color.orange, icon: "sun.max")
         }
     }
 
@@ -327,7 +366,6 @@ struct JottInputArea: View {
                 // Type badge
                 if let b = badge {
                     GradientTypeBadge(info: b)
-                        .id(b.label)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.5, anchor: .leading).combined(with: .opacity),
                             removal:   .scale(scale: 0.5, anchor: .leading).combined(with: .opacity)
@@ -361,14 +399,18 @@ struct JottInputArea: View {
                     // Mic button
                     Button(action: toggleVoice) {
                         ZStack {
+                            Circle()
+                                .fill(speech.isRecording
+                                    ? Color(red: 0.98, green: 0.45, blue: 0.45).opacity(0.18)
+                                    : Color(red: 0.72, green: 0.67, blue: 1.0).opacity(0.15))
+                                .frame(width: 28, height: 28)
                             if speech.isRecording {
                                 VoiceWaveformView(level: speech.audioLevel)
-                                    .frame(width: 28, height: 20)
+                                    .frame(width: 18, height: 14)
                             } else {
-                                Image(systemName: "microphone")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary.opacity(0.45))
-                                    .frame(width: 24, height: 24)
+                                Image(systemName: "microphone.fill")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(Color(red: 0.55, green: 0.50, blue: 0.98).opacity(0.75))
                             }
                         }
                     }
@@ -455,7 +497,7 @@ struct JottInputArea: View {
             default:         return ""
             }
         }
-        return viewModel.inputText.hasPrefix("/") ? "" : "jott something down..."
+        return viewModel.inputText.hasPrefix("/") ? "" : "Type or / for actions…"
     }
 
     private func toggleVoice() {
@@ -525,21 +567,50 @@ struct VoiceWaveformView: View {
 struct GradientTypeBadge: View {
     let info: TypeBadgeInfo
     @State private var appeared = false
+    @State private var bgColor: Color = .clear
+    @State private var fgColor: Color = .clear
+    @State private var icon: String = ""
+    @State private var badgeScale: CGFloat = 1.0
+    @State private var iconScale: CGFloat = 1.0
 
     var body: some View {
-        Image(systemName: info.icon)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(info.fg)
-            .frame(width: 22, height: 22)
-            .background(info.bg)
-            .clipShape(Circle())
-            .scaleEffect(appeared ? 1.0 : 0.4)
-            .opacity(appeared ? 1.0 : 0)
-            .onAppear {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                    appeared = true
+        ZStack {
+            Circle()
+                .fill(bgColor)
+                .frame(width: 22, height: 22)
+            Image(systemName: icon.isEmpty ? info.icon : icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(fgColor)
+                .scaleEffect(iconScale)
+        }
+        .scaleEffect(badgeScale * (appeared ? 1.0 : 0.4))
+        .opacity(appeared ? 1.0 : 0)
+        .onAppear {
+            bgColor = info.bg
+            fgColor = info.fg
+            icon = info.icon
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.58)) {
+                appeared = true
+            }
+        }
+        .onChange(of: info) { _, newInfo in
+            // Squish down — badge and icon compress at the peak
+            withAnimation(.spring(response: 0.14, dampingFraction: 0.52)) {
+                badgeScale = 0.78
+                iconScale  = 0.55
+            }
+            // Swap icon + bleed new colors at the squish valley
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
+                icon   = newInfo.icon
+                fgColor = newInfo.fg
+                // Bg bleeds as it springs back — felt as a liquid pour
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.52)) {
+                    bgColor    = newInfo.bg
+                    badgeScale = 1.0
+                    iconScale  = 1.0
                 }
             }
+        }
     }
 }
 
@@ -559,6 +630,8 @@ struct JottCommandResults: View {
         case .search:    return "SEARCH"
         case .open:      return "ACTION"
         case .calendar:  return "CALENDAR"
+        case .inbox:     return "INBOX"
+        case .today:     return "TODAY"
         }
     }
 
@@ -569,6 +642,8 @@ struct JottCommandResults: View {
                 JottOpenAction(viewModel: viewModel)
             } else if case .calendar = command {
                 CalendarResultsView(viewModel: viewModel)
+            } else if case .today = command {
+                JottTodayView(viewModel: viewModel)
             } else {
                 HStack {
                     Text(label)
@@ -589,18 +664,21 @@ struct JottCommandResults: View {
                         .foregroundColor(.secondary.opacity(0.4))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                JottRow(item: item, viewModel: viewModel, isSelected: index == viewModel.selectedCommandIndex)
-                                    .transition(.asymmetric(
-                                        insertion: .push(from: .bottom).combined(with: .opacity),
-                                        removal: .move(edge: .leading).combined(with: .opacity)
-                                    ))
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                    JottRow(item: item, viewModel: viewModel, isSelected: index == viewModel.selectedCommandIndex)
+                                        .id(index)
+                                        .transition(.opacity)
+                                }
                             }
+                            .padding(.bottom, 6)
+                            .animation(.spring(response: 0.34, dampingFraction: 0.8), value: items.map(\.id))
                         }
-                        .padding(.bottom, 6)
-                        .animation(.spring(response: 0.34, dampingFraction: 0.8), value: items.map(\.id))
+                        .onChange(of: viewModel.selectedCommandIndex) { idx in
+                            proxy.scrollTo(idx)
+                        }
                     }
                 }
             }
@@ -618,12 +696,14 @@ struct CommandChip {
 }
 
 let allCommandChips: [CommandChip] = [
+    CommandChip(label: "Today",     shorthand: "/t",    icon: "sun.max",            insert: "/today"),
     CommandChip(label: "Calendar",  shorthand: "/c",    icon: "calendar",           insert: "/calendar"),
     CommandChip(label: "Notes",     shorthand: "/n",    icon: "note.text",           insert: "/notes"),
     CommandChip(label: "Reminders", shorthand: "/r",    icon: "bell",               insert: "/reminders"),
     CommandChip(label: "Meetings",  shorthand: "/m",    icon: "person.2",           insert: "/meetings"),
     CommandChip(label: "Search",    shorthand: "/s",    icon: "magnifyingglass",    insert: "/search "),
     CommandChip(label: "Open",      shorthand: "/open", icon: "folder",             insert: "/open"),
+    CommandChip(label: "Inbox",     shorthand: "/i",    icon: "tray",               insert: "/inbox"),
 ]
 
 struct JottCommandSuggestionBar: View {
@@ -947,6 +1027,113 @@ struct CalendarRow: View {
     }
 }
 
+// MARK: - Smart Recall View
+
+struct SmartRecallView: View {
+    @ObservedObject var viewModel: OverlayViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("SUGGESTIONS")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.45))
+                    .tracking(0.6)
+                Spacer()
+                Text("\(viewModel.smartRecallResults.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.3))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+
+            ForEach(Array(viewModel.smartRecallResults.enumerated()), id: \.element.id) { index, item in
+                JottRow(item: item, viewModel: viewModel, isSelected: index == viewModel.selectedCommandIndex)
+                    .id(index)
+            }
+        }
+    }
+}
+
+// MARK: - Today View
+
+struct JottTodayView: View {
+    @ObservedObject var viewModel: OverlayViewModel
+
+    private let cal = Calendar.current
+
+    var todayItems: [TimelineItem] {
+        let reminders = viewModel.getAllReminders()
+            .filter { !$0.isCompleted && cal.isDateInToday($0.dueDate) }
+            .sorted { $0.dueDate < $1.dueDate }
+            .map { TimelineItem.reminder($0) }
+        let meetings = viewModel.getAllMeetings()
+            .filter { cal.isDateInToday($0.startTime) }
+            .sorted { $0.startTime < $1.startTime }
+            .map { TimelineItem.meeting($0) }
+        return reminders + meetings
+    }
+
+    var recentNotes: [TimelineItem] {
+        Array(viewModel.getAllNotes().prefix(4).map { TimelineItem.note($0) })
+    }
+
+    var pendingItems: [TimelineItem] {
+        let now = Date()
+        return viewModel.getAllReminders()
+            .filter { !$0.isCompleted && $0.dueDate < now && !cal.isDateInToday($0.dueDate) }
+            .sorted { $0.dueDate > $1.dueDate }
+            .prefix(3)
+            .map { TimelineItem.reminder($0) }
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 0) {
+                if todayItems.isEmpty && recentNotes.isEmpty && pendingItems.isEmpty {
+                    Text("Nothing for today")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary.opacity(0.4))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    if !todayItems.isEmpty {
+                        sectionHeader("TODAY")
+                        ForEach(Array(todayItems.enumerated()), id: \.element.id) { i, item in
+                            JottRow(item: item, viewModel: viewModel, isSelected: false)
+                        }
+                    }
+                    if !recentNotes.isEmpty {
+                        sectionHeader("RECENT")
+                        ForEach(Array(recentNotes.enumerated()), id: \.element.id) { i, item in
+                            JottRow(item: item, viewModel: viewModel, isSelected: false)
+                        }
+                    }
+                    if !pendingItems.isEmpty {
+                        sectionHeader("PENDING")
+                        ForEach(Array(pendingItems.enumerated()), id: \.element.id) { i, item in
+                            JottRow(item: item, viewModel: viewModel, isSelected: false)
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.secondary.opacity(0.45))
+            .tracking(0.6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+    }
+}
+
 // MARK: - /open action view
 
 struct JottOpenAction: View {
@@ -962,7 +1149,7 @@ struct JottOpenAction: View {
                     .frame(width: 18)
                 Text("Open Notes Folder in Finder")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color(red: 0.1, green: 0.1, blue: 0.12))
+                    .foregroundColor(.primary)
                 Spacer()
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 10, weight: .medium))
@@ -1220,14 +1407,58 @@ struct JottNativeInput: NSViewRepresentable {
                     return true
                 }
             }
-            // Command mode creation: Enter creates the item
+            // Shift+Enter → insert a literal newline (multi-line content)
+            if sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+                tv.insertText("\n", replacementRange: tv.selectedRange())
+                return true
+            }
+            // Enter → create/save the item (command mode OR forced type)
             if sel == #selector(NSResponder.insertNewline(_:)),
-               parent.viewModel.commandMode != nil,
-               !parent.viewModel.inputText.isEmpty,
+               !parent.viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty,
                parent.viewModel.commandCreationPreview() != nil {
                 let vm = parent.viewModel
-                DispatchQueue.main.async { vm.createFromCommandMode() }
+                DispatchQueue.main.async { vm.createCurrentItem() }
                 return true
+            }
+            // Smart Recall navigation
+            if parent.viewModel.isSmartRecalling {
+                let items = parent.viewModel.smartRecallResults
+                if !items.isEmpty {
+                    if sel == #selector(NSResponder.moveDown(_:)) {
+                        let next = min(parent.viewModel.selectedCommandIndex + 1, items.count - 1)
+                        parent.viewModel.selectedCommandIndex = next
+                        return true
+                    }
+                    if sel == #selector(NSResponder.moveUp(_:)) {
+                        let prev = max(parent.viewModel.selectedCommandIndex - 1, 0)
+                        parent.viewModel.selectedCommandIndex = prev
+                        return true
+                    }
+                    if sel == #selector(NSResponder.insertNewline(_:)) {
+                        let idx = max(0, min(parent.viewModel.selectedCommandIndex, items.count - 1))
+                        let vm = parent.viewModel
+                        DispatchQueue.main.async {
+                            switch items[idx] {
+                            case .note(let n):     vm.selectedNote = n
+                            case .reminder(let r): vm.selectedReminder = r
+                            case .meeting(let m):  vm.selectedMeeting = m
+                            }
+                        }
+                        return true
+                    }
+                    if sel == #selector(NSResponder.insertTab(_:)) {
+                        let idx = max(0, min(parent.viewModel.selectedCommandIndex, items.count - 1))
+                        let vm = parent.viewModel
+                        DispatchQueue.main.async {
+                            switch items[idx] {
+                            case .note(let n):     vm.selectedNote = n
+                            case .reminder(let r): vm.selectedReminder = r
+                            case .meeting(let m):  vm.selectedMeeting = m
+                            }
+                        }
+                        return true
+                    }
+                }
             }
             if parent.viewModel.currentCommand != nil {
                 let items = parent.viewModel.currentCommandItems()
@@ -1241,15 +1472,35 @@ struct JottNativeInput: NSViewRepresentable {
                         return true
                     }
                     if sel == #selector(NSResponder.insertNewline(_:)) {
-                        parent.viewModel.openSelectedCommandItem()
+                        if parent.viewModel.inlineEditingId != nil {
+                            parent.viewModel.saveInlineEdit()
+                        } else {
+                            parent.viewModel.startInlineEdit()
+                            if parent.viewModel.inlineEditingId == nil {
+                                parent.viewModel.openSelectedCommandItem()
+                            }
+                        }
                         return true
                     }
                 }
             }
+            // Cmd+D → mark selected reminder as done
+            if sel == #selector(NSResponder.deleteToEndOfLine(_:)) {
+                let items = !parent.viewModel.currentCommandItems().isEmpty
+                    ? parent.viewModel.currentCommandItems()
+                    : parent.viewModel.smartRecallResults
+                guard !items.isEmpty else { return false }
+                let idx = max(0, min(parent.viewModel.selectedCommandIndex, items.count - 1))
+                if case .reminder(let r) = items[idx] {
+                    parent.viewModel.markReminderDone(r.id)
+                    return true
+                }
+                return false
+            }
             // Tab-complete a /command suggestion → lock commandMode, clear input
+            // Also works when already in a command mode (allows switching)
             if sel == #selector(NSResponder.insertTab(_:)),
                !parent.viewModel.isForcedCreationMode,
-               parent.viewModel.commandMode == nil,
                parent.viewModel.inputText.hasPrefix("/") {
                 let query = parent.viewModel.inputText.lowercased().dropFirst()
                 let match = allCommandChips.first {
@@ -1264,6 +1515,22 @@ struct JottNativeInput: NSViewRepresentable {
                     parent.text = ""
                     return true
                 }
+            }
+            // If no command prefix, cycle type with Tab
+            if sel == #selector(NSResponder.insertTab(_:)),
+               !parent.viewModel.inputText.hasPrefix("/"),
+               !parent.viewModel.inputText.isEmpty {
+                let current = parent.viewModel.forcedTypeOverride ?? parent.viewModel.detectedType
+                let next: DetectedType
+                switch current {
+                case .note:     next = .reminder
+                case .reminder: next = .meeting
+                case .meeting:  next = .note
+                }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    parent.viewModel.forcedTypeOverride = next
+                }
+                return true
             }
             if sel == #selector(NSResponder.cancelOperation(_:)) {
                 parent.onEscape()
@@ -1417,6 +1684,12 @@ struct JottRow: View {
     @ObservedObject var viewModel: OverlayViewModel
     var isSelected: Bool = false
     @State private var hovered = false
+    @FocusState private var isInlineFocused: Bool
+
+    var isDoneReminder: Bool {
+        if case .reminder(let r) = item { return r.isCompleted }
+        return false
+    }
 
     var accent: Color {
         switch item {
@@ -1469,20 +1742,48 @@ struct JottRow: View {
             }
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(viewModel.isDarkMode
-                        ? Color(red: 0.92, green: 0.92, blue: 0.94)
-                        : Color(red: 0.1, green: 0.1, blue: 0.12))
-                    .lineLimit(1)
-                if let m = meta {
-                    Text(m)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.5))
+                if case .note(let n) = item, viewModel.inlineEditingId == n.id {
+                    TextField("", text: $viewModel.inlineEditText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(viewModel.isDarkMode
+                            ? Color(red: 0.92, green: 0.92, blue: 0.94)
+                            : Color(red: 0.1, green: 0.1, blue: 0.12))
+                        .focused($isInlineFocused)
+                        .onSubmit { viewModel.saveInlineEdit() }
+                        .onExitCommand { viewModel.cancelInlineEdit() }
+                        .onAppear { isInlineFocused = true }
+                } else {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(viewModel.isDarkMode
+                            ? Color(red: 0.92, green: 0.92, blue: 0.94)
+                            : Color(red: 0.1, green: 0.1, blue: 0.12))
                         .lineLimit(1)
+                    if let m = meta {
+                        Text(m)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary.opacity(0.45))
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer()
+
+            // Complete button — reminders only, hover
+            if hovered, case .reminder(let r) = item {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        viewModel.markReminderDone(r.id)
+                    }
+                }) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color(red: 0.35, green: 0.72, blue: 0.50))
+                }
+                .buttonStyle(.plain)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
+            }
 
             // Open in editor button — only for notes, only on hover
             if hovered, case .note(let n) = item {
@@ -1538,7 +1839,7 @@ struct JottRow: View {
             Group {
                 if hovered || isSelected {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05))
+                        .fill(isSelected ? Color.primary.opacity(0.09) : Color.primary.opacity(0.07))
                         .padding(.horizontal, 6)
                 }
             }
@@ -1552,6 +1853,8 @@ struct JottRow: View {
                     .shadow(color: accent.opacity(0.4), radius: 4, x: 0, y: 0)
             }
         }
+        .opacity(isDoneReminder ? 0.35 : 1.0)
+        .animation(.easeOut(duration: 0.3), value: isDoneReminder)
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) { hovered = h } }
         .animation(.spring(response: 0.24, dampingFraction: 0.65), value: hovered)
