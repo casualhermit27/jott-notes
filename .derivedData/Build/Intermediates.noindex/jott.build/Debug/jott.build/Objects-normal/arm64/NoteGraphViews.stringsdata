@@ -1,0 +1,16 @@
+{
+  "source": "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/NoteGraphViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Connections",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 157
+        }
+      }
+    ]
+  },
+  "version": 1
+}

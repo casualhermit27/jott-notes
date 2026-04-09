@@ -1,10 +1,10 @@
 {
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/ContentView.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ContentView.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ContentView.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ContentView.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ContentView.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ContentView.swiftdeps"
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Window/LibraryWindowController.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.swiftdeps"
   },
   "/Users/harshachaganti/Documents/work/jott-notes/jott/Window/OverlayPanel.swift" : {
     "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/OverlayPanel.swiftconstvalues",

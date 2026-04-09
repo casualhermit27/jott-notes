@@ -1,0 +1,166 @@
+{
+  "object" : {
+    "artifacts" : [
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "sentry-cocoa",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/getsentry/sentry-cocoa",
+          "name" : "sentry-cocoa"
+        },
+        "path" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/SourcePackages/artifacts/sentry-cocoa/Sentry-Dynamic/Sentry-Dynamic.xcframework",
+        "source" : {
+          "checksum" : "07d2a8a928bf49d44ed498a4a994d736d3e9e44667e5c5082dba0d6be526b339",
+          "type" : "remote",
+          "url" : "https://github.com/getsentry/sentry-cocoa/releases/download/8.58.0/Sentry-Dynamic.xcframework.zip"
+        },
+        "targetName" : "Sentry-Dynamic"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "sentry-cocoa",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/getsentry/sentry-cocoa",
+          "name" : "sentry-cocoa"
+        },
+        "path" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/SourcePackages/artifacts/sentry-cocoa/Sentry-Dynamic-WithARM64e/Sentry-Dynamic-WithARM64e.xcframework",
+        "source" : {
+          "checksum" : "2f13dc949fb3f795222f7420aca649b32f365137d27cc13311e2e59eeb902691",
+          "type" : "remote",
+          "url" : "https://github.com/getsentry/sentry-cocoa/releases/download/8.58.0/Sentry-Dynamic-WithARM64e.xcframework.zip"
+        },
+        "targetName" : "Sentry-Dynamic-WithARM64e"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "sentry-cocoa",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/getsentry/sentry-cocoa",
+          "name" : "sentry-cocoa"
+        },
+        "path" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/SourcePackages/artifacts/sentry-cocoa/Sentry-WithoutUIKitOrAppKit-WithARM64e/Sentry-WithoutUIKitOrAppKit-WithARM64e.xcframework",
+        "source" : {
+          "checksum" : "93377c7cb7a020c5bab375ca32bd26f954e54dcb1b21860b9c6dff0f3476413e",
+          "type" : "remote",
+          "url" : "https://github.com/getsentry/sentry-cocoa/releases/download/8.58.0/Sentry-WithoutUIKitOrAppKit-WithARM64e.xcframework.zip"
+        },
+        "targetName" : "Sentry-WithoutUIKitOrAppKit-WithARM64e"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "sentry-cocoa",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/getsentry/sentry-cocoa",
+          "name" : "sentry-cocoa"
+        },
+        "path" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/SourcePackages/artifacts/sentry-cocoa/Sentry/Sentry.xcframework",
+        "source" : {
+          "checksum" : "d883f19575ab064633237c2c58ee16a1e596c58f5efe1c110f65998bc71b0389",
+          "type" : "remote",
+          "url" : "https://github.com/getsentry/sentry-cocoa/releases/download/8.58.0/Sentry.xcframework.zip"
+        },
+        "targetName" : "Sentry"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "sentry-cocoa",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/getsentry/sentry-cocoa",
+          "name" : "sentry-cocoa"
+        },
+        "path" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/SourcePackages/artifacts/sentry-cocoa/Sentry-WithoutUIKitOrAppKit/Sentry-WithoutUIKitOrAppKit.xcframework",
+        "source" : {
+          "checksum" : "d6e65593d9538db22d318afda5828889d3eacd1aa89957a37fe81725ec91141e",
+          "type" : "remote",
+          "url" : "https://github.com/getsentry/sentry-cocoa/releases/download/8.58.0/Sentry-WithoutUIKitOrAppKit.xcframework.zip"
+        },
+        "targetName" : "Sentry-WithoutUIKitOrAppKit"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "sparkle",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/sparkle-project/Sparkle",
+          "name" : "Sparkle"
+        },
+        "path" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework",
+        "source" : {
+          "checksum" : "44a0d5a00d5bfb6c2ad1755a92b694d948876d61ad44f35a0119eb0e7ace4b65",
+          "type" : "remote",
+          "url" : "https://github.com/sparkle-project/Sparkle/releases/download/2.9.0/Sparkle-for-Swift-Package-Manager.zip"
+        },
+        "targetName" : "Sparkle"
+      }
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "sentry-cocoa",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/getsentry/sentry-cocoa",
+          "name" : "sentry-cocoa"
+        },
+        "state" : {
+          "checkoutState" : {
+            "revision" : "16cd512711375fa73f25ae5e373f596bdf4251ae",
+            "version" : "8.58.0"
+          },
+          "name" : "sourceControlCheckout"
+        },
+        "subpath" : "sentry-cocoa"
+      },
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "sparkle",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/sparkle-project/Sparkle",
+          "name" : "Sparkle"
+        },
+        "state" : {
+          "checkoutState" : {
+            "revision" : "21d8df80440b1ca3b65fa82e40782f1e5a9e6ba2",
+            "version" : "2.9.0"
+          },
+          "name" : "sourceControlCheckout"
+        },
+        "subpath" : "Sparkle"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

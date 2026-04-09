@@ -4,8 +4,8 @@ import SwiftUI
 import AppKit
 import EventKit
 
-enum DetectedType { case note, reminder, meeting }
-enum FilterType   { case all, notes, reminders, meetings }
+enum DetectedType { case note, reminder }
+enum FilterType   { case all, notes, reminders }
 
 @MainActor
 final class OverlayViewModel: ObservableObject {
@@ -16,7 +16,7 @@ final class OverlayViewModel: ObservableObject {
             guard !isProcessing else { return }
             isProcessing = true
             defer { isProcessing = false }
-            stripCreationPrefixIfNeeded()   // strip /note , /reminder , /meeting  → sets forcedTypeOverride
+            stripCreationPrefixIfNeeded()   // strip /note , /reminder  → sets forcedTypeOverride
             detectType()
             updateCommandSelectionIfNeeded()
         }
@@ -32,16 +32,27 @@ final class OverlayViewModel: ObservableObject {
     @Published var selectedNote: Note?
     @Published var selectedReminder: Reminder?
     @Published var selectedMeeting: Meeting?
+    @Published private var meetings: [Meeting] = []
 
     // Note editing
     @Published var isEditingNote: Bool = false
     @Published var editingNoteText: String = ""
     @Published var selectedCommandIndex: Int = 0
 
+    // Subnote context — when set, new notes are created as subnotes of this note
+    @Published var subnoteParentId: UUID? = nil
+
+    // Subnote draft session — persists across panel open/close until user explicitly commits
+    var subnoteSessionId: UUID? = nil
+    var subnoteSessionParentId: UUID? = nil
+    var subnoteSessionText: String = ""
+
     // MARK: - Private
-    private let store: NoteStore
+    private let providedStore: NoteStore?
+    private var store: NoteStore { providedStore ?? NoteStore.shared }
     private var isProcessing = false
     private var lastCommand: JottCommand?
+    private var storeCancellables = Set<AnyCancellable>()
 
     /// Stable ID for the current open session's note
     private var sessionNoteId: UUID?
@@ -54,13 +65,26 @@ final class OverlayViewModel: ObservableObject {
     // MARK: - Calendar
     let calendarManager = CalendarManager.shared
 
+    // MARK: - Position
+    @AppStorage("jott_overlayPosition") var overlayPosition: String = "center"
+
+    /// Panel width adapts: full-width at center, slightly narrower at corners.
+    var panelDisplayWidth: CGFloat { overlayPosition == "center" ? 520 : 460 }
+
     // MARK: - Init
     init(store: NoteStore? = nil) {
-        self.store = store ?? NoteStore.shared
+        self.providedStore = store
         self.isDarkMode = UserDefaults.standard.bool(forKey: "jott_darkMode")
+
+        self.store.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &storeCancellables)
     }
 
-    // MARK: - Forced creation mode (/note , /reminder , /meeting )
+    // MARK: - Forced creation mode (/note , /reminder )
 
     /// Set when user types a creation prefix + space — prefix is then stripped from inputText
     @Published var forcedTypeOverride: DetectedType? = nil
@@ -71,7 +95,6 @@ final class OverlayViewModel: ObservableObject {
         let low = inputText.lowercased()
         if low.hasPrefix("/note ")     { return .note }
         if low.hasPrefix("/reminder ") { return .reminder }
-        if low.hasPrefix("/meeting ")  { return .meeting }
         return nil
     }
 
@@ -80,7 +103,7 @@ final class OverlayViewModel: ObservableObject {
 
     /// Backspace on empty field — clears the locked type so user can pick another
     func clearForcedType() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+        withAnimation(JottMotion.content) {
             forcedTypeOverride = nil
         }
     }
@@ -89,7 +112,7 @@ final class OverlayViewModel: ObservableObject {
     private func stripCreationPrefixIfNeeded() {
         let low = inputText.lowercased()
         let prefixes: [(String, DetectedType)] = [
-            ("/note ", .note), ("/reminder ", .reminder), ("/meeting ", .meeting)
+            ("/note ", .note), ("/reminder ", .reminder)
         ]
         for (prefix, type) in prefixes {
             guard low.hasPrefix(prefix) else { continue }
@@ -107,9 +130,6 @@ final class OverlayViewModel: ObservableObject {
         let low = inputText.lowercased()
         if low.contains("remind me") || low.contains("remember to") || low.contains("don't forget") {
             detectedType = .reminder
-        } else if low.contains("meeting with") || low.contains("call with")
-                   || low.contains("sync with") || low.contains("standup") || low.contains("@") {
-            detectedType = .meeting
         } else {
             detectedType = .note
         }
@@ -117,7 +137,7 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Session-based auto-save (debounced 0.6s)
     /// Saves (or updates) the single note for this open session
-    private func commitSession() {
+    private func commitSession(showFeedback: Bool = true) {
         let raw = inputText.trimmingCharacters(in: .whitespaces)
         guard !raw.isEmpty else { return }
 
@@ -138,17 +158,21 @@ final class OverlayViewModel: ObservableObject {
                 // Check for checklist first
                 if let items = NaturalLanguageParser.detectChecklist(text) {
                     let mdText = items.map { "- \($0)" }.joined(separator: "\n")
-                    store.upsertNote(Note(id: id, text: mdText))
-                    showFeedback("Checklist · \(items.count) items", icon: "checklist")
+                    store.upsertNote(Note(id: id, text: mdText, parentId: subnoteParentId))
+                    if showFeedback {
+                        showStoreFeedback(success: "Checklist · \(items.count) items", icon: "checklist")
+                    }
                     return
                 }
                 let parsed = NaturalLanguageParser.parse(text)
                 if case .note(let t, let tags) = parsed {
-                    store.upsertNote(Note(id: id, text: t, tags: tags))
+                    store.upsertNote(Note(id: id, text: t, tags: tags, parentId: subnoteParentId))
                 } else {
-                    store.upsertNote(Note(id: id, text: text))
+                    store.upsertNote(Note(id: id, text: text, parentId: subnoteParentId))
                 }
-                showFeedback("Note saved", icon: "note.text")
+                if showFeedback {
+                    showStoreFeedback(success: "Note saved", icon: "note.text")
+                }
             case .reminder:
                 let parsed = NaturalLanguageParser.parse(text)
                 let rec = NaturalLanguageParser.extractRecurrence(from: text)
@@ -156,41 +180,24 @@ final class OverlayViewModel: ObservableObject {
                     let r = Reminder(text: t, dueDate: d, tags: tags)
                     store.saveReminder(r); NotificationManager.shared.scheduleReminder(r)
                     let timeStr = timeFmt.string(from: d)
-                    if calendarManager.createReminder(title: t, dueDate: d, recurrence: rec) {
-                        showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                    if showFeedback, calendarManager.createReminder(title: t, dueDate: d, recurrence: rec) {
+                        showStoreFeedback(success: "Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                    } else if showFeedback {
+                        showStoreFeedback(success: "Reminder set · \(timeStr)", icon: "bell.fill")
                     } else {
-                        showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
+                        _ = calendarManager.createReminder(title: t, dueDate: d, recurrence: rec)
                     }
                 } else {
                     let d = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     let r = Reminder(text: text, dueDate: d, tags: [])
                     store.saveReminder(r); NotificationManager.shared.scheduleReminder(r)
                     let timeStr = timeFmt.string(from: d)
-                    if calendarManager.createReminder(title: text, dueDate: d, recurrence: rec) {
-                        showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                    if showFeedback, calendarManager.createReminder(title: text, dueDate: d, recurrence: rec) {
+                        showStoreFeedback(success: "Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                    } else if showFeedback {
+                        showStoreFeedback(success: "Reminder set · \(timeStr)", icon: "bell.fill")
                     } else {
-                        showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
-                    }
-                }
-            case .meeting:
-                let parsed = NaturalLanguageParser.parse(text)
-                let rec = NaturalLanguageParser.extractRecurrence(from: text)
-                if case .meeting(let title, let participants, let startTime, let tags) = parsed {
-                    store.saveMeeting(Meeting(title: title, participants: participants, startTime: startTime, tags: tags))
-                    let timeStr = timeFmt.string(from: startTime)
-                    if calendarManager.createEvent(title: title, startDate: startTime, recurrence: rec) {
-                        showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
-                    } else {
-                        showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
-                    }
-                } else {
-                    let startTime = Date()
-                    store.saveMeeting(Meeting(title: text, participants: [], startTime: startTime, tags: []))
-                    let timeStr = timeFmt.string(from: startTime)
-                    if calendarManager.createEvent(title: text, startDate: startTime, recurrence: rec) {
-                        showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
-                    } else {
-                        showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
+                        _ = calendarManager.createReminder(title: text, dueDate: d, recurrence: rec)
                     }
                 }
             }
@@ -204,8 +211,10 @@ final class OverlayViewModel: ObservableObject {
             let id = sessionNoteId ?? UUID()
             sessionNoteId = id
             let mdText = items.map { "- \($0)" }.joined(separator: "\n")
-            store.upsertNote(Note(id: id, text: mdText))
-            showFeedback("Checklist · \(items.count) items", icon: "checklist")
+            store.upsertNote(Note(id: id, text: mdText, parentId: subnoteParentId))
+            if showFeedback {
+                showStoreFeedback(success: "Checklist · \(items.count) items", icon: "checklist")
+            }
             return
         }
 
@@ -215,9 +224,10 @@ final class OverlayViewModel: ObservableObject {
         let parsed = NaturalLanguageParser.parse(raw)
         switch parsed {
         case .note(let noteText, let tags):
-            store.upsertNote(Note(id: id, text: noteText, tags: tags))
-            resolveWikiLinks(noteId: id, text: noteText)
-            showFeedback("Note saved", icon: "note.text")
+            store.upsertNote(Note(id: id, text: noteText, tags: tags, parentId: subnoteParentId))
+            if showFeedback {
+                showStoreFeedback(success: "Note saved", icon: "note.text")
+            }
 
         case .reminder(let reminderText, let dueDate, let tags):
             let reminder = Reminder(text: reminderText, dueDate: dueDate, tags: tags)
@@ -225,37 +235,47 @@ final class OverlayViewModel: ObservableObject {
             NotificationManager.shared.scheduleReminder(reminder)
             let rec = NaturalLanguageParser.extractRecurrence(from: raw)
             let timeStr = timeFmt.string(from: dueDate)
-            if calendarManager.createReminder(title: reminderText, dueDate: dueDate, recurrence: rec) {
-                showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+            if showFeedback, calendarManager.createReminder(title: reminderText, dueDate: dueDate, recurrence: rec) {
+                showStoreFeedback(success: "Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+            } else if showFeedback {
+                showStoreFeedback(success: "Reminder set · \(timeStr)", icon: "bell.fill")
             } else {
-                showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
-            }
-
-        case .meeting(let title, let participants, let startTime, let tags):
-            store.saveMeeting(Meeting(title: title, participants: participants, startTime: startTime, tags: tags))
-            let rec = NaturalLanguageParser.extractRecurrence(from: raw)
-            let timeStr = timeFmt.string(from: startTime)
-            if calendarManager.createEvent(title: title, startDate: startTime, recurrence: rec) {
-                showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
-            } else {
-                showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
+                _ = calendarManager.createReminder(title: reminderText, dueDate: dueDate, recurrence: rec)
             }
         }
+    }
+
+    func persistCurrentNoteDraftImmediately() {
+        let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
+        guard forcedTypeOverride != .reminder else { return }
+        guard !raw.hasPrefix("/") || isForcedCreationMode else { return }
+        commitSession(showFeedback: false)
+        objectWillChange.send()
     }
 
     func showFeedback(_ message: String, icon: String = "checkmark.circle.fill") {
         statusTask?.cancel()
         feedbackIcon = icon
-        withAnimation(.easeInOut(duration: 0.25)) { autoSaveStatus = message }
+        withAnimation(JottMotion.content) { autoSaveStatus = message }
         statusTask = Task {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.5)) { autoSaveStatus = "" }
+            withAnimation(JottMotion.content) { autoSaveStatus = "" }
+        }
+    }
+
+    private func showStoreFeedback(success: String, icon: String) {
+        if let error = store.consumeLastErrorMessage() {
+            showFeedback(error, icon: "exclamationmark.triangle.fill")
+        } else {
+            showFeedback(success, icon: icon)
         }
     }
 
     // MARK: - Lifecycle
     func show() {
+        store.refreshFromDisk()
         commandMode = nil
 
         // Grace-period restore: if dismissed recently with content, bring it back
@@ -274,7 +294,6 @@ final class OverlayViewModel: ObservableObject {
         forcedTypeOverride = nil
         selectedNote = nil
         selectedReminder = nil
-        selectedMeeting = nil
         isEditingNote = false
         autoSaveStatus = ""
 
@@ -289,31 +308,44 @@ final class OverlayViewModel: ObservableObject {
     }
 
     func dismiss() {
-        commandMode = nil
-        commandModeDateOverride = nil
-
+        // Save before we close
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty && (!text.hasPrefix("/") || isForcedCreationMode) {
-            // Save on close — this is the only save trigger for plain notes
+        if !text.isEmpty && text != "?" && (!text.hasPrefix("/") || isForcedCreationMode) {
             commitSession()
             lastDismissDate = Date()
         } else {
-            // Nothing to save — full reset
             lastDismissDate = nil
             sessionNoteId = nil
-            inputText = ""
         }
 
+        // Start the window dismiss immediately, then reset all UI state
+        // without animations so the dropdown/toolbar never visibly collapse
+        // — the window exit animation is the only thing the user sees.
         isVisible = false
-        selectedNote = nil
-        selectedReminder = nil
-        selectedMeeting = nil
-        isEditingNote = false
-        autoSaveStatus = ""
+        withTransaction(Transaction(animation: nil)) {
+            commandMode = nil
+            commandModeDateOverride = nil
+            inputText = ""
+            selectedNote = nil
+            selectedReminder = nil
+            isEditingNote = false
+            autoSaveStatus = ""
+            subnoteParentId = nil
+        }
     }
 
     func toggle() { isVisible ? dismiss() : show() }
-    func handleEscape() { dismiss() }
+
+    func handleEscape() {
+        if selectedNote != nil || selectedReminder != nil {
+            if let note = selectedNote, isEditingNote { saveEditedNote(note) }
+            selectedNote = nil
+            selectedReminder = nil
+            isEditingNote = false
+        } else {
+            dismiss()
+        }
+    }
 
     /// True when user is in a command mode but has started typing "/" to switch to another command
     var isTypingNewCommand: Bool {
@@ -328,7 +360,6 @@ final class OverlayViewModel: ObservableObject {
                 switch mode {
                 case .notes:     return .notes(query: "")
                 case .reminders: return .reminders(query: "")
-                case .meetings:  return .meetings(query: "")
                 case .inbox:     return .inbox
                 case .today:     return .today
                 default:         return mode
@@ -337,7 +368,7 @@ final class OverlayViewModel: ObservableObject {
             switch mode {
             case .notes:     return .notes(query: inputText)
             case .reminders: return .reminders(query: inputText)
-            case .meetings:  return .meetings(query: inputText)
+            case .search:    return .search(query: inputText)
             default:         return mode
             }
         }
@@ -359,13 +390,17 @@ final class OverlayViewModel: ObservableObject {
             let all = getAllReminders()
             if q.isEmpty { return all.map { .reminder($0) } }
             return all.filter { $0.text.lowercased().contains(q.lowercased()) }.map { .reminder($0) }
-        case .meetings(let q):
-            let all = getAllMeetings()
-            if q.isEmpty { return all.map { .meeting($0) } }
-            return all.filter { $0.title.lowercased().contains(q.lowercased()) }.map { .meeting($0) }
         case .search(let q):
-            guard !q.isEmpty else { return [] }
-            return searchNotes(q).map { .note($0) }
+            let notes = searchNotes(q).map { TimelineItem.note($0) }
+            let reminders: [TimelineItem]
+            if q.isEmpty {
+                reminders = getAllReminders().map { TimelineItem.reminder($0) }
+            } else {
+                reminders = getAllReminders()
+                    .filter { $0.text.lowercased().contains(q.lowercased()) }
+                    .map { TimelineItem.reminder($0) }
+            }
+            return (notes + reminders).sorted { $0.date > $1.date }
         case .open:
             return []
         case .calendar:
@@ -373,19 +408,13 @@ final class OverlayViewModel: ObservableObject {
         case .inbox:
             let notes = getAllNotes().map { TimelineItem.note($0) }
             let reminders = getAllReminders().map { TimelineItem.reminder($0) }
-            let meetings = getAllMeetings().map { TimelineItem.meeting($0) }
-            return (notes + reminders + meetings).sorted { $0.date > $1.date }
+            return (notes + reminders).sorted { $0.date > $1.date }
         case .today:
             let cal = Calendar.current
-            let todayReminders = getAllReminders()
+            return getAllReminders()
                 .filter { !$0.isCompleted && cal.isDateInToday($0.dueDate) }
                 .sorted { $0.dueDate < $1.dueDate }
                 .map { TimelineItem.reminder($0) }
-            let todayMeetings = getAllMeetings()
-                .filter { cal.isDateInToday($0.startTime) }
-                .sorted { $0.startTime < $1.startTime }
-                .map { TimelineItem.meeting($0) }
-            return (todayReminders + todayMeetings)
         }
     }
 
@@ -414,7 +443,6 @@ final class OverlayViewModel: ObservableObject {
         switch items[idx] {
         case .note(let n):     selectedNote = n
         case .reminder(let r): selectedReminder = r
-        case .meeting(let m):  selectedMeeting = m
         }
     }
 
@@ -422,22 +450,25 @@ final class OverlayViewModel: ObservableObject {
     @Published var activeTagFilter: String? = nil
 
     func setTagFilter(_ tag: String?) {
-        withAnimation(.easeInOut(duration: 0.2)) { activeTagFilter = tag }
+        withAnimation(JottMotion.content) { activeTagFilter = tag }
     }
 
     // MARK: - Data access
+    /// Root notes only — used for browsing (inbox, notes list, smart recall).
     func getAllNotes() -> [Note] {
-        let notes = store.allNotes()
+        let notes = store.allNotes().filter { $0.parentId == nil }
         guard let tag = activeTagFilter else { return notes }
         return notes.filter { $0.tags.contains(tag) }
     }
-    func getAllReminders() -> [Reminder] { store.allReminders() }
-    func getAllMeetings()  -> [Meeting]  { store.allMeetings() }
 
+    func getAllReminders() -> [Reminder] { store.allReminders() }
+    func getAllMeetings() -> [Meeting] { meetings.sorted { $0.startTime < $1.startTime } }
+
+    /// Search includes subnotes, showing them with a parent breadcrumb via the existing UI.
     func searchNotes(_ query: String) -> [Note] {
         guard !query.isEmpty else { return getAllNotes() }
         let q = query.lowercased()
-        return getAllNotes().filter { $0.text.lowercased().contains(q) }
+        return store.allNotes().filter { $0.text.lowercased().contains(q) }
     }
 
     // MARK: - Pin
@@ -459,19 +490,48 @@ final class OverlayViewModel: ObservableObject {
         objectWillChange.send()
     }
 
-    func deleteMeeting(_ id: UUID) {
-        store.deleteMeeting(id)
-        objectWillChange.send()
-    }
-
     // MARK: - Calendar
     func getUpcomingCalendarEvents() -> [EKEvent] {
         calendarManager.upcomingEvents()
     }
 
     func importCalendarEvent(_ event: EKEvent) {
-        let meeting = calendarManager.importAsMeeting(event)
-        store.saveMeeting(meeting)
+        let participants = (event.attendees ?? [])
+            .compactMap { attendee -> String? in
+                if let name = attendee.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                    return name
+                }
+                return attendee.url.absoluteString
+            }
+
+        let trimmedTitle = event.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
+        if let trimmedTitle, !trimmedTitle.isEmpty {
+            title = trimmedTitle
+        } else {
+            title = "Untitled"
+        }
+        let start = event.startDate ?? Date()
+        let durationMinutes = max(1, Int((event.endDate ?? start).timeIntervalSince(start) / 60))
+
+        var meeting = Meeting(
+            title: title,
+            participants: participants,
+            startTime: start,
+            duration: durationMinutes,
+            tags: []
+        )
+        meeting.description = event.notes
+
+        if !meetings.contains(where: { $0.title == meeting.title && $0.startTime == meeting.startTime }) {
+            meetings.append(meeting)
+        }
+        let selectedTitle = meeting.title
+        let selectedStartTime = meeting.startTime
+        let matchedMeeting = meetings.first { existingMeeting in
+            existingMeeting.title == selectedTitle && existingMeeting.startTime == selectedStartTime
+        }
+        selectedMeeting = matchedMeeting ?? meeting
         objectWillChange.send()
     }
 
@@ -479,6 +539,11 @@ final class OverlayViewModel: ObservableObject {
     func toggleDarkMode() {
         isDarkMode.toggle()
         UserDefaults.standard.set(isDarkMode, forKey: "jott_darkMode")
+    }
+
+    func setDarkMode(_ enabled: Bool) {
+        isDarkMode = enabled
+        UserDefaults.standard.set(enabled, forKey: "jott_darkMode")
     }
 
     // MARK: - Clipboard
@@ -518,132 +583,6 @@ final class OverlayViewModel: ObservableObject {
         objectWillChange.send()
     }
 
-    // MARK: - [[ Inline Link Autocomplete
-    @Published var isLinkAutocompleting: Bool = false
-    @Published var linkQuery: String = ""
-    @Published var linkCandidates: [Note] = []
-    @Published var selectedLinkIndex: Int = 0
-    /// Set by selectLinkCandidate; consumed by JottNativeInput.updateNSView to do the text replacement.
-    @Published var pendingLinkCompletionTitle: String? = nil
-
-    func updateLinkQuery(_ query: String) {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        let all = store.allNotes()
-        linkCandidates = all
-            .filter { note in
-                guard note.id != sessionNoteId else { return false }
-                let title = noteTitleLine(note)
-                if trimmed.isEmpty { return true }
-                return title.lowercased().contains(trimmed.lowercased())
-                    || note.text.lowercased().contains(trimmed.lowercased())
-            }
-            .prefix(6)
-            .map { $0 }
-        linkQuery = query
-        selectedLinkIndex = 0
-        isLinkAutocompleting = true
-    }
-
-    func selectLinkCandidate(_ note: Note) {
-        pendingLinkCompletionTitle = noteTitleLine(note)
-        dismissLinkAutocomplete()
-    }
-
-    func selectCurrentLinkCandidate() {
-        guard !linkCandidates.isEmpty else { return }
-        selectLinkCandidate(linkCandidates[selectedLinkIndex])
-    }
-
-    func moveLinkSelection(by delta: Int) {
-        guard !linkCandidates.isEmpty else { return }
-        selectedLinkIndex = max(0, min(linkCandidates.count - 1, selectedLinkIndex + delta))
-    }
-
-    func dismissLinkAutocomplete() {
-        isLinkAutocompleting = false
-        linkQuery = ""
-        linkCandidates = []
-        selectedLinkIndex = 0
-    }
-
-    private func noteTitleLine(_ note: Note) -> String {
-        note.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? note.text
-    }
-
-    /// Called after saving a note — resolves [[title]] syntax into linkedNoteIds.
-    private func resolveWikiLinks(noteId: UUID, text: String) {
-        guard let expr = try? NSRegularExpression(pattern: "\\[\\[([^\\]]+)\\]\\]") else { return }
-        let ns = text as NSString
-        let matches = expr.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            guard m.numberOfRanges > 1 else { continue }
-            let r = m.range(at: 1)
-            guard r.location != NSNotFound else { continue }
-            let rawTitle = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rawTitle.isEmpty else { continue }
-            let needle = rawTitle.lowercased()
-            let candidates = store.allNotes().filter { $0.id != noteId }
-
-            let exact = candidates.first(where: {
-                let t = ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
-                return t == needle
-            })
-            if let target = exact {
-                store.linkNotes(fromId: noteId, toId: target.id)
-                continue
-            }
-
-            let prefixMatches = candidates.filter {
-                let t = ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
-                return t.hasPrefix(needle)
-            }
-            if prefixMatches.count == 1, let target = prefixMatches.first {
-                store.linkNotes(fromId: noteId, toId: target.id)
-                continue
-            }
-
-            let containsMatches = candidates.filter {
-                let t = ($0.text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? $0.text)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
-                return t.contains(needle)
-            }
-            if containsMatches.count == 1, let target = containsMatches.first {
-                store.linkNotes(fromId: noteId, toId: target.id)
-            }
-        }
-    }
-
-    // MARK: - Note Linking (UI picker)
-    @Published var showingLinkPicker: Bool = false
-
-    func linkNote(_ fromId: UUID, to toId: UUID) {
-        store.linkNotes(fromId: fromId, toId: toId)
-        if selectedNote?.id == fromId {
-            selectedNote = store.note(for: fromId)
-        }
-        objectWillChange.send()
-    }
-
-    func unlinkNote(_ fromId: UUID, from toId: UUID) {
-        store.unlinkNotes(fromId: fromId, toId: toId)
-        if selectedNote?.id == fromId {
-            selectedNote = store.note(for: fromId)
-        }
-        objectWillChange.send()
-    }
-
-    func linkedNotes(for note: Note) -> [Note] {
-        note.linkedNoteIds.compactMap { store.note(for: $0) }
-    }
-
-    func backlinks(for note: Note) -> [Note] {
-        store.backlinks(for: note.id)
-    }
 
     // MARK: - Note editing
     func startEditingNote(_ note: Note) {
@@ -662,9 +601,92 @@ final class OverlayViewModel: ObservableObject {
         cancelEditingNote()
     }
 
+    /// Saves the current edit without exiting edit mode (autosave path).
+    func autoSaveEditedNote(_ originalNote: Note) {
+        let text = editingNoteText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        var updated = originalNote
+        updated.text = text
+        updated.modifiedAt = Date()
+        store.upsertNote(updated)
+        selectedNote = updated
+        showFeedback("Saved", icon: "checkmark.circle.fill")
+    }
+
+    @discardableResult
+    func updateNote(_ originalNote: Note, text: String) -> Note? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var updated = originalNote
+        updated.text = trimmed
+        updated.modifiedAt = Date()
+        store.upsertNote(updated)
+        objectWillChange.send()
+        return updated
+    }
+
     func cancelEditingNote() {
         isEditingNote = false
         editingNoteText = ""
+    }
+
+    // MARK: - Subnotes
+
+    func createSubnote(parentId: UUID, text: String) {
+        let note = Note(text: text, parentId: parentId)
+        store.upsertNote(note)
+        objectWillChange.send()
+    }
+
+    /// Auto-saves subnote draft as user types. Reuses same UUID until commitSubnoteDraft() clears it.
+    func autoSaveSubnoteDraft(parentId: UUID, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Start a new session if parent changed or no session exists
+        if subnoteSessionParentId != parentId {
+            subnoteSessionId = nil
+        }
+        subnoteSessionParentId = parentId
+        subnoteSessionText = text
+        let id = subnoteSessionId ?? UUID()
+        subnoteSessionId = id
+        store.upsertNote(Note(id: id, text: trimmed, parentId: parentId))
+        objectWillChange.send()
+    }
+
+    /// Call on Enter — seals the current draft and clears session so next entry is a new subnote.
+    func commitSubnoteDraft() {
+        subnoteSessionId = nil
+        subnoteSessionText = ""
+        // Keep subnoteSessionParentId so we know which parent we were on
+    }
+
+    /// Discards an unsaved empty draft and clears session.
+    func discardSubnoteDraft(parentId: UUID) {
+        if subnoteSessionParentId == parentId, let id = subnoteSessionId {
+            let text = subnoteSessionText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { store.deleteNote(id) }
+        }
+        subnoteSessionId = nil
+        subnoteSessionText = ""
+        subnoteSessionParentId = nil
+        objectWillChange.send()
+    }
+
+    func subnotes(of parentId: UUID) -> [Note] {
+        store.subnotes(of: parentId)
+    }
+
+    func subnoteCount(of parentId: UUID) -> Int {
+        store.subnoteCount(of: parentId)
+    }
+
+    func deleteSubnote(_ id: UUID) {
+        // Also delete any children of this subnote
+        let children = store.subnotes(of: id)
+        for child in children { store.deleteNote(child.id) }
+        store.deleteNote(id)
+        objectWillChange.send()
     }
 
     func setFilterType(_ type: FilterType) { filterType = type }
@@ -704,12 +726,12 @@ final class OverlayViewModel: ObservableObject {
         let isDateMode: Bool
         if let mode = commandMode {
             switch mode {
-            case .calendar, .meetings, .reminders: isDateMode = true
+            case .calendar, .reminders: isDateMode = true
             default: return nil
             }
         } else if let forced = forcedType {
             switch forced {
-            case .reminder, .meeting: isDateMode = true
+            case .reminder: isDateMode = true
             default: return nil
             }
         } else {
@@ -746,27 +768,15 @@ final class OverlayViewModel: ObservableObject {
                 showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
             }
             return ok
-        case .meetings:
-            let recLabel = rec.map { " (\($0.label))" } ?? ""
-            store.saveMeeting(Meeting(title: result.title + recLabel, participants: [], startTime: date, tags: []))
-            inputText = ""; commandMode = nil
-            let calOk = calendarManager.createEvent(title: result.title + recLabel, startDate: date, recurrence: rec)
-            if calOk {
-                showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
-            } else {
-                showFeedback("Meeting saved · \(timeStr)", icon: "calendar")
-            }
-            objectWillChange.send()
-            return true
         case .reminders:
             let r = Reminder(text: result.title, dueDate: date, tags: [])
             store.saveReminder(r)
             NotificationManager.shared.scheduleReminder(r)
             inputText = ""; commandMode = nil
             if calendarManager.createReminder(title: result.title, dueDate: date, recurrence: rec) {
-                showFeedback("Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
+                showStoreFeedback(success: "Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
             } else {
-                showFeedback("Reminder set · \(timeStr)", icon: "bell.fill")
+                showStoreFeedback(success: "Reminder set · \(timeStr)", icon: "bell.fill")
             }
             objectWillChange.send()
             return true
@@ -799,28 +809,19 @@ final class OverlayViewModel: ObservableObject {
             store.saveReminder(r)
             NotificationManager.shared.scheduleReminder(r)
             if calendarManager.createReminder(title: result.title, dueDate: date, recurrence: rec) {
-                showFeedback("Reminder → Apple Reminders · \(timeFmt.string(from: date))", icon: "bell.fill")
+                showStoreFeedback(success: "Reminder → Apple Reminders · \(timeFmt.string(from: date))", icon: "bell.fill")
             } else {
-                showFeedback("Reminder set · \(timeFmt.string(from: date))", icon: "bell.fill")
-            }
-        case .meeting:
-            let result = NaturalLanguageParser.parseForEvent(from: text)
-            let rec    = NaturalLanguageParser.extractRecurrence(from: text)
-            let date   = commandModeDateOverride ?? result.date
-            store.saveMeeting(Meeting(title: result.title, participants: [], startTime: date, tags: []))
-            if calendarManager.createEvent(title: result.title, startDate: date, recurrence: rec) {
-                showFeedback("Event → Apple Calendar · \(timeFmt.string(from: date))", icon: "calendar")
-            } else {
-                showFeedback("Meeting saved · \(timeFmt.string(from: date))", icon: "calendar")
+                showStoreFeedback(success: "Reminder set · \(timeFmt.string(from: date))", icon: "bell.fill")
             }
         case .note:
-            commitSession()
-            showFeedback("Note saved", icon: "note.text")
+            commitSession(showFeedback: false)
+            showStoreFeedback(success: "Note saved", icon: "note.text")
         }
 
         // Reset for next entry — stay open
         sessionNoteId = nil
         commandModeDateOverride = nil
+        subnoteParentId = nil
         inputText = ""
         objectWillChange.send()
     }
@@ -833,16 +834,44 @@ final class OverlayViewModel: ObservableObject {
               inputText.count >= 2 else { return [] }
         let q = inputText.lowercased()
         var results: [TimelineItem] = []
-        let matchingNotes = getAllNotes().filter { $0.text.lowercased().contains(q) }
+        // Search all notes (including subnotes) — root notes first, then subnotes
+        let all = store.allNotes().filter { $0.text.lowercased().contains(q) }
+        let rootMatches = all.filter { $0.parentId == nil }
+        let subMatches  = all.filter { $0.parentId != nil }
         let matchingReminders = getAllReminders().filter { $0.text.lowercased().contains(q) }
-        let matchingMeetings = getAllMeetings().filter { $0.title.lowercased().contains(q) }
-        results += matchingNotes.prefix(3).map { .note($0) }
+        results += rootMatches.prefix(2).map { .note($0) }
+        results += subMatches.prefix(2).map { .note($0) }
         results += matchingReminders.prefix(2).map { .reminder($0) }
-        results += matchingMeetings.prefix(2).map { .meeting($0) }
         return Array(results.prefix(5))
     }
 
     var isSmartRecalling: Bool { !smartRecallResults.isEmpty }
+
+    // MARK: - Tag Autocomplete
+    /// Returns the partial tag being typed (text after the last `#` in the last word), or nil if not applicable.
+    var tagQuery: String? {
+        guard !inputText.hasPrefix("/"), !inputText.isEmpty else { return nil }
+        let components = inputText.components(separatedBy: " ")
+        guard let last = components.last, last.hasPrefix("#") else { return nil }
+        return String(last.dropFirst())
+    }
+
+    var isTagAutocompleting: Bool {
+        guard let q = tagQuery else { return false }
+        return !tagCandidates(for: q).isEmpty
+    }
+
+    func tagCandidates(for query: String) -> [String] {
+        let allTags = Array(Set(getAllNotes().flatMap { $0.tags })).sorted()
+        if query.isEmpty { return Array(allTags.prefix(8)) }
+        return Array(allTags.filter { $0.lowercased().hasPrefix(query.lowercased()) }.prefix(8))
+    }
+
+    func completeTag(_ tag: String) {
+        let suffix = "#\(tagQuery ?? "")"
+        guard inputText.hasSuffix(suffix) else { return }
+        inputText = String(inputText.dropLast(suffix.count)) + "#\(tag) "
+    }
 
     // MARK: - Quick Complete
     func markReminderDone(_ id: UUID) {

@@ -13,7 +13,7 @@ struct SaveConfirmationView: View {
                     .foregroundStyle(Color.jottGreen)
                     .scaleEffect(show ? 1.0 : 0.5)
                     .opacity(show ? 1.0 : 0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.65), value: show)
+                    .animation(JottMotion.content, value: show)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

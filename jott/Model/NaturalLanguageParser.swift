@@ -31,7 +31,6 @@ struct ParsedRecurrence: Equatable {
 enum ParsedContent {
     case note(text: String, tags: [String])
     case reminder(text: String, dueDate: Date, tags: [String])
-    case meeting(title: String, participants: [String], startTime: Date, tags: [String])
 }
 
 struct NaturalLanguageParser {
@@ -43,15 +42,7 @@ struct NaturalLanguageParser {
             if let parsed = parseReminder(input) {
                 return parsed
             }
-        }
-
-        // Check for meeting patterns
-        if lowercased.contains("meeting with") || lowercased.contains("call with") ||
-           lowercased.contains("sync with") || lowercased.contains("standup") ||
-           lowercased.contains("@") {
-            if let parsed = parseMeeting(input) {
-                return parsed
-            }
+            Telemetry.recordNLPParseFailure(intent: "reminder", input: input)
         }
 
         // Default to note
@@ -84,56 +75,6 @@ struct NaturalLanguageParser {
 
         guard !text.isEmpty else { return nil }
         return .reminder(text: text, dueDate: dueDate, tags: tags)
-    }
-
-    private static func parseMeeting(_ input: String) -> ParsedContent? {
-        var title = input
-        var participants: [String] = []
-        var startTime = Date().addingTimeInterval(3600)
-
-        // Extract participants (after "with" or before "@")
-        if let withRange = input.range(of: "with ", options: .caseInsensitive) {
-            let afterWith = String(input[withRange.upperBound...])
-            let parts = afterWith.split(separator: " ", maxSplits: 1)
-            if let firstPart = parts.first {
-                let name = String(firstPart).trimmingCharacters(in: CharacterSet(charactersIn: ",.!?"))
-                participants.append(name)
-            }
-        }
-
-        // Extract @ mentions
-        let atPattern = "@(\\w+)"
-        let regex = try? NSRegularExpression(pattern: atPattern, options: [])
-        let nsInput = input as NSString
-        let matches = regex?.matches(in: input, options: [], range: NSRange(location: 0, length: nsInput.length)) ?? []
-        for match in matches {
-            if match.numberOfRanges > 1 {
-                let nameRange = match.range(at: 1)
-                if let range = Range(nameRange, in: input) {
-                    participants.append(String(input[range]))
-                }
-            }
-        }
-
-        // Extract time
-        if let date = extractDate(from: input) {
-            startTime = date
-        }
-
-        // Clean title
-        title = input
-            .replacingOccurrences(of: "meeting with ", with: "", options: .caseInsensitive)
-            .replacingOccurrences(of: "call with ", with: "", options: .caseInsensitive)
-            .replacingOccurrences(of: "sync with ", with: "", options: .caseInsensitive)
-
-        title = removeDateReferences(from: title)
-        title = title.split(separator: " ").prefix(5).joined(separator: " ")
-        title = title.trimmingCharacters(in: .whitespaces)
-
-        let tags = extractTags(from: input)
-
-        guard !title.isEmpty else { return nil }
-        return .meeting(title: title, participants: participants, startTime: startTime, tags: tags)
     }
 
     static func extractDate(from text: String) -> Date? {
@@ -323,9 +264,9 @@ struct NaturalLanguageParser {
                       "sep":9,"sept":9,"oct":10,"nov":11,"dec":12]
 
         // Pattern: "month day [year]"
-        let pat1 = #"(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{1,2})(?:\s+(\d{4}))?"#
+        let pat1 = #"\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{1,2})(?!\d)(?:\s+(\d{4}))?\b"#
         // Pattern: "day month [year]"
-        let pat2 = #"(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)(?:\s+(\d{4}))?"#
+        let pat2 = #"\b(\d{1,2})(?!\d)\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)(?:\s+(\d{4}))?\b"#
 
         var month: Int?; var day: Int?; var year: Int?
 

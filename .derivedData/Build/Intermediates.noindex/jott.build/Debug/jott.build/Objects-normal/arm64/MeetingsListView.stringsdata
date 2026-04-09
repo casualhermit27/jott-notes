@@ -1,0 +1,32 @@
+{
+  "source": "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/MeetingsListView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "No upcoming meetings",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 14
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 73
+        }
+      },
+      {
+        "comment": "",
+        "key": "mins",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 76
+        }
+      }
+    ]
+  },
+  "version": 1
+}

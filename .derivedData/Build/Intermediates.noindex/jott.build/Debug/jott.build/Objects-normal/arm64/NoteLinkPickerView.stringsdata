@@ -1,0 +1,56 @@
+{
+  "source": "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/NoteLinkPickerView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "No notes found",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 78
+        }
+      },
+      {
+        "comment": "",
+        "key": "Try a broader search or type `@@` while writing to link inline.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 81
+        }
+      },
+      {
+        "comment": "",
+        "key": "Link a note",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 107
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search or click a note card to link it. You can also type `@@` while writing.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 110
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search notes to link...",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 134
+        }
+      },
+      {
+        "comment": "",
+        "key": "Linked",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 178
+        }
+      }
+    ]
+  },
+  "version": 1
+}

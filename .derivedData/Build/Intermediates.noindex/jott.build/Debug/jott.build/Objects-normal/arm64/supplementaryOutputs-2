@@ -6,18 +6,18 @@
     "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CalendarManager.o",
     "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CalendarManager.swiftdeps"
   },
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Model/ClipboardMonitor.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ClipboardMonitor.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ClipboardMonitor.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ClipboardMonitor.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ClipboardMonitor.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/ClipboardMonitor.swiftdeps"
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Model/NaturalLanguageParser.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NaturalLanguageParser.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NaturalLanguageParser.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NaturalLanguageParser.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NaturalLanguageParser.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NaturalLanguageParser.swiftdeps"
   },
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Model/Meeting.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/Meeting.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/Meeting.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/Meeting.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/Meeting.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/Meeting.swiftdeps"
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Model/NoteStore.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteStore.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteStore.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteStore.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteStore.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteStore.swiftdeps"
   }
 }

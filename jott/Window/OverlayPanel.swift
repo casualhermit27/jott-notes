@@ -5,12 +5,14 @@ extension NSNotification.Name {
 }
 
 class OverlayPanel: NSPanel {
+    /// Set to true while a drag operation is targeting the panel so resignKey doesn't dismiss it.
+    static var suppressResignKey = false
+
     init() {
         super.init(
             contentRect: .zero,
             styleMask: [
                 .borderless,
-                .nonactivatingPanel,
                 .fullSizeContentView
             ],
             backing: .buffered,
@@ -43,6 +45,7 @@ class OverlayPanel: NSPanel {
 
     override func resignKey() {
         super.resignKey()
+        guard !Self.suppressResignKey else { return }
         NotificationCenter.default.post(name: .overlayDidResignKey, object: nil)
     }
 }

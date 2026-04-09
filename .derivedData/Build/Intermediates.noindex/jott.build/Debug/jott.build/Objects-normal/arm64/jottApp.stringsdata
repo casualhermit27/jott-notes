@@ -1,0 +1,112 @@
+{
+  "source": "/Users/harshachaganti/Documents/work/jott-notes/jott/jottApp.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "jott",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 22
+        }
+      },
+      {
+        "comment": "",
+        "key": "Jott Settings",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 27
+        }
+      },
+      {
+        "comment": "",
+        "key": "RECENT",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 84
+        }
+      },
+      {
+        "comment": "",
+        "key": "Jott",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 60
+        }
+      },
+      {
+        "comment": "",
+        "key": "⌥⌥",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 67
+        }
+      },
+      {
+        "comment": "",
+        "key": "All Notes (%lld)",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 119
+        }
+      },
+      {
+        "comment": "",
+        "key": "Appearance",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 132
+        }
+      },
+      {
+        "comment": "",
+        "key": "Appearance",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 137
+        }
+      },
+      {
+        "comment": "",
+        "key": "Light",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 138
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dark",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 139
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose Notes Folder...",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 153
+        }
+      },
+      {
+        "comment": "",
+        "key": "Settings...",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 164
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quit",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 175
+        }
+      }
+    ]
+  },
+  "version": 1
+}

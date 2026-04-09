@@ -21,7 +21,7 @@ struct CaptureInputView: View {
         .frame(height: 280)
         .scaleEffect(viewModel.isVisible ? 1.0 : 0.92)
         .opacity(viewModel.isVisible ? 1.0 : 0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.isVisible)
+        .animation(JottMotion.panel, value: viewModel.isVisible)
         .onAppear { isFocused = true }
         .onChange(of: viewModel.isVisible) { _, isVisible in
             if isVisible {

@@ -21,13 +21,13 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.0.1</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>MacOSX</string>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>DTCompiler</key>
 	<string>com.apple.compilers.llvm.clang.1_0</string>
 	<key>DTPlatformBuild</key>
@@ -44,11 +44,25 @@
 	<string>2620</string>
 	<key>DTXcodeBuild</key>
 	<string>17C52</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.2</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Jott reads your calendar to show and import upcoming events as meetings.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Jott reads and writes calendar events to help schedule meetings.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Jott can create calendar events on your behalf.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Jott uses the microphone to transcribe voice notes.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Jott creates reminders and reads reminder lists to keep your tasks in sync.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Jott creates reminders to capture your tasks.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Jott uses speech recognition to convert your voice to text.</string>
 </dict>
 </plist>

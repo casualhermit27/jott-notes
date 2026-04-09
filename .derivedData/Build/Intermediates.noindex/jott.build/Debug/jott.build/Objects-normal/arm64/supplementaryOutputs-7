@@ -1,4 +1,11 @@
 {
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/NoteLinkAutocompleteView.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkAutocompleteView.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkAutocompleteView.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkAutocompleteView.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkAutocompleteView.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkAutocompleteView.swiftdeps"
+  },
   "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/NoteLinkPickerView.swift" : {
     "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkPickerView.swiftconstvalues",
     "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteLinkPickerView.d",
@@ -12,12 +19,5 @@
     "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/OverlayView.dia",
     "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/OverlayView.o",
     "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/OverlayView.swiftdeps"
-  },
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/RemindersListView.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.swiftdeps"
   }
 }

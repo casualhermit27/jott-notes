@@ -1,0 +1,16 @@
+{
+  "source": "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/RemindersListView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "No upcoming reminders",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 14
+        }
+      }
+    ]
+  },
+  "version": 1
+}

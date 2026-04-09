@@ -24,7 +24,7 @@ struct InputOnlyView: View {
             ZStack(alignment: .topLeading) {
                 // Placeholder
                 if viewModel.inputText.isEmpty {
-                    Text("Type a note, reminder, or meeting...\n\nExamples:\n• remind me to call john tomorrow 3pm\n• meeting with sarah friday 2pm\n• buy milk #shopping")
+                    Text("Type a note or reminder...\n\nExamples:\n• remind me to call john tomorrow 3pm\n• buy milk #shopping")
                         .font(.system(size: 15, weight: .regular))
                         .foregroundColor(.secondary.opacity(0.4))
                         .padding(14)
@@ -73,7 +73,7 @@ struct InputOnlyView: View {
         .frame(width: adaptiveWidth())
         .scaleEffect(viewModel.isVisible ? 1.0 : 0.92)
         .opacity(viewModel.isVisible ? 1.0 : 0)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: viewModel.isVisible)
+        .animation(JottMotion.panel, value: viewModel.isVisible)
         .onAppear {
             isFocused = true
         }

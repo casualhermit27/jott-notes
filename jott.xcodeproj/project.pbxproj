@@ -6,8 +6,24 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1B2C3D4E5F60718293A0001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A0003 /* Sentry */; };
+		A1B2C3D4E5F60718293A0002 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A0004 /* Sparkle */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F0A1B2C3D4E5F6071829000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E50C872B2F6F317400EEF1FD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E50C87322F6F317400EEF1FD;
+			remoteInfo = jott;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		E50C87332F6F317400EEF1FD /* jott.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = jott.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0A1B2C3D4E5F60718290001 /* jottTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = jottTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +32,24 @@
 			path = jott;
 			sourceTree = "<group>";
 		};
+		F0A1B2C3D4E5F60718290002 /* jottTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = jottTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		E50C87302F6F317400EEF1FD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F60718293A0001 /* Sentry in Frameworks */,
+				A1B2C3D4E5F60718293A0002 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0A1B2C3D4E5F60718290005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				E50C87352F6F317400EEF1FD /* jott */,
+				F0A1B2C3D4E5F60718290002 /* jottTests */,
 				E50C87342F6F317400EEF1FD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				E50C87332F6F317400EEF1FD /* jott.app */,
+				F0A1B2C3D4E5F60718290001 /* jottTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -65,10 +97,35 @@
 			);
 			name = jott;
 			packageProductDependencies = (
+				A1B2C3D4E5F60718293A0003 /* Sentry */,
+				A1B2C3D4E5F60718293A0004 /* Sparkle */,
 			);
 			productName = jott;
 			productReference = E50C87332F6F317400EEF1FD /* jott.app */;
 			productType = "com.apple.product-type.application";
+		};
+		F0A1B2C3D4E5F60718290003 /* jottTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F0A1B2C3D4E5F60718290007 /* Build configuration list for PBXNativeTarget "jottTests" */;
+			buildPhases = (
+				F0A1B2C3D4E5F60718290004 /* Sources */,
+				F0A1B2C3D4E5F60718290005 /* Frameworks */,
+				F0A1B2C3D4E5F60718290006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F0A1B2C3D4E5F6071829000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F0A1B2C3D4E5F60718290002 /* jottTests */,
+			);
+			name = jottTests;
+			packageProductDependencies = (
+			);
+			productName = jottTests;
+			productReference = F0A1B2C3D4E5F60718290001 /* jottTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -83,6 +140,10 @@
 					E50C87322F6F317400EEF1FD = {
 						CreatedOnToolsVersion = 26.2;
 					};
+					F0A1B2C3D4E5F60718290003 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = E50C87322F6F317400EEF1FD;
+					};
 				};
 			};
 			buildConfigurationList = E50C872E2F6F317400EEF1FD /* Build configuration list for PBXProject "jott" */;
@@ -94,18 +155,30 @@
 			);
 			mainGroup = E50C872A2F6F317400EEF1FD;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A1B2C3D4E5F60718293A0005 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+				A1B2C3D4E5F60718293A0006 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E50C87342F6F317400EEF1FD /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				E50C87322F6F317400EEF1FD /* jott */,
+				F0A1B2C3D4E5F60718290003 /* jottTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		E50C87312F6F317400EEF1FD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0A1B2C3D4E5F60718290006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +195,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F0A1B2C3D4E5F60718290004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F0A1B2C3D4E5F6071829000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E50C87322F6F317400EEF1FD /* jott */;
+			targetProxy = F0A1B2C3D4E5F6071829000A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		E50C873C2F6F317500EEF1FD /* Debug */ = {
@@ -252,7 +340,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 847R6X96S2;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -266,21 +354,29 @@
 				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_SPEECH_RECOGNITION = YES;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_JottUpdateChannel = direct;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "Jott needs Accessibility access to listen for the global hotkey from any app.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Jott reads your calendar to show and import upcoming events as meetings.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Jott reads and writes calendar events to help schedule meetings.";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Jott can create calendar events on your behalf.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Jott creates reminders and reads reminder lists to keep your tasks in sync.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Jott creates reminders to capture your tasks.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_SUFeedURL = "https://example.com/jott/appcast.xml";
+				INFOPLIST_KEY_SentryDSN = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -300,7 +396,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 847R6X96S2;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -314,21 +410,29 @@
 				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_SPEECH_RECOGNITION = YES;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_JottUpdateChannel = direct;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "Jott needs Accessibility access to listen for the global hotkey from any app.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Jott reads your calendar to show and import upcoming events as meetings.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Jott reads and writes calendar events to help schedule meetings.";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Jott can create calendar events on your behalf.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Jott creates reminders and reads reminder lists to keep your tasks in sync.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Jott creates reminders to capture your tasks.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_SUFeedURL = "https://example.com/jott/appcast.xml";
+				INFOPLIST_KEY_SentryDSN = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -338,6 +442,39 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F0A1B2C3D4E5F60718290008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jottTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/jott.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/jott";
+			};
+			name = Debug;
+		};
+		F0A1B2C3D4E5F60718290009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jottTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/jott.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/jott";
 			};
 			name = Release;
 		};
@@ -362,7 +499,48 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		F0A1B2C3D4E5F60718290007 /* Build configuration list for PBXNativeTarget "jottTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F0A1B2C3D4E5F60718290008 /* Debug */,
+				F0A1B2C3D4E5F60718290009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D4E5F60718293A0005 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.57.0;
+			};
+		};
+		A1B2C3D4E5F60718293A0006 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D4E5F60718293A0003 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60718293A0005 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+		A1B2C3D4E5F60718293A0004 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60718293A0006 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E50C872B2F6F317400EEF1FD /* Project object */;
 }

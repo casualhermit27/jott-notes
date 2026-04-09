@@ -9,6 +9,10 @@ import SwiftUI
 import AppKit
 import Combine
 
+extension Notification.Name {
+    static let jottThemeDidChange = Notification.Name("jottThemeDidChange")
+}
+
 @main
 struct jottApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -38,6 +42,16 @@ struct MenuBarContentView: View {
     @Environment(\.openWindow) private var openWindow
 
     private let menuWidth: CGFloat = 320
+    private var isDarkMode: Bool { menuBarStore.isDarkMode }
+    private var appearanceSelection: Binding<Int> {
+        Binding(
+            get: { isDarkMode ? 1 : 0 },
+            set: { newValue in
+                appDelegate.setDarkMode(newValue == 1)
+                menuBarStore.refresh()
+            }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,11 +60,11 @@ struct MenuBarContentView: View {
                 Text("Jott")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Button(action: { appDelegate.windowController?.toggle() }) {
+                Button(action: { appDelegate.toggleOverlay() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 9, weight: .medium))
-                        Text("⌥ Space")
+                        Text("⌥⌥")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .foregroundColor(.secondary)
@@ -77,13 +91,13 @@ struct MenuBarContentView: View {
                     .padding(.bottom, 2)
 
                 ForEach(menuBarStore.recentNotes) { note in
-                    Button(action: { appDelegate.windowController?.openNote(note) }) {
+                    Button(action: { appDelegate.openNote(note) }) {
                         HStack(spacing: 8) {
-                            Image(systemName: "note.text")
+                            Image(systemName: menuNoteIcon(note))
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                                 .frame(width: 16)
-                            Text(note.text.components(separatedBy: "\n").first ?? note.text)
+                            Text(menuNoteTitle(note))
                                 .font(.system(size: 12))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -101,7 +115,7 @@ struct MenuBarContentView: View {
                     .padding(.horizontal, 14)
                 }
 
-                Button(action: { appDelegate.windowController?.openAllNotes() }) {
+                Button(action: { appDelegate.openAllNotes() }) {
                     Text("All Notes (\(menuBarStore.totalCount))")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.accentColor)
@@ -114,23 +128,26 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            Button(action: {
-                appDelegate.windowController?.toggleDarkMode()
-                menuBarStore.refresh()
-            }) {
-                HStack {
-                    Image(systemName: menuBarStore.isDarkMode ? "sun.max" : "moon")
-                    Text(menuBarStore.isDarkMode ? "Light Mode" : "Dark Mode")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Appearance")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+
+                Picker("Appearance", selection: appearanceSelection) {
+                    Label("Light", systemImage: "sun.max").tag(0)
+                    Label("Dark", systemImage: "moon.stars").tag(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .labelsHidden()
+                .pickerStyle(.segmented)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
 
             Divider()
 
-            Button(action: { appDelegate.windowController?.viewModel.selectNotesFolder() }) {
+            Button(action: { appDelegate.selectNotesFolder() }) {
                 HStack {
                     Image(systemName: "folder")
                     Text("Choose Notes Folder...")
@@ -163,10 +180,27 @@ struct MenuBarContentView: View {
             .buttonStyle(.plain)
         }
         .frame(width: menuWidth)
+        .jottAppTypography()
         .onAppear {
             menuBarStore.refresh()
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func isImageLine(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        return t.hasPrefix("![") && t.contains("](") && t.hasSuffix(")")
+    }
+
+    private func menuNoteTitle(_ note: Note) -> String {
+        let lines = note.text.components(separatedBy: "\n")
+        return lines.first { !isImageLine($0) && !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            ?? (lines.contains(where: { isImageLine($0) }) ? "(Image)" : (lines.first ?? note.text))
+    }
+
+    private func menuNoteIcon(_ note: Note) -> String {
+        let lines = note.text.components(separatedBy: "\n")
+        return lines.contains(where: { isImageLine($0) }) ? "photo" : "note.text"
     }
 
     private func shortDate(_ date: Date) -> String {
@@ -190,6 +224,23 @@ final class MenuBarStore: ObservableObject {
     @Published var recentNotes: [Note] = []
     @Published var totalCount: Int = 0
     @Published var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "jott_darkMode")
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        NotificationCenter.default.publisher(for: .jottThemeDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &cancellables)
+
+        NoteStore.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &cancellables)
+    }
 
     func refresh() {
         let all = NoteStore.shared.allNotes()
@@ -211,17 +262,68 @@ extension Bundle {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: OverlayWindowController?
+    var libraryWindowController: LibraryWindowController?
+
+    private func ensureWindowController() -> OverlayWindowController {
+        if let controller = windowController {
+            return controller
+        }
+        let controller = OverlayWindowController()
+        windowController = controller
+        return controller
+    }
+
+    private func ensureLibraryWindowController() -> LibraryWindowController {
+        if let controller = libraryWindowController {
+            return controller
+        }
+        let controller = LibraryWindowController(viewModel: ensureWindowController().viewModel)
+        libraryWindowController = controller
+        return controller
+    }
+
+    func toggleOverlay() {
+        ensureWindowController().toggle()
+    }
+
+    func openNote(_ note: Note) {
+        ensureWindowController().openNote(note)
+    }
+
+    func openAllNotes() {
+        ensureLibraryWindowController().show()
+    }
+
+    func toggleDarkMode() {
+        setDarkMode(!UserDefaults.standard.bool(forKey: "jott_darkMode"))
+    }
+
+    func setDarkMode(_ enabled: Bool) {
+        if let windowController {
+            windowController.setDarkMode(enabled)
+        } else {
+            UserDefaults.standard.set(enabled, forKey: "jott_darkMode")
+        }
+        NotificationCenter.default.post(name: .jottThemeDidChange, object: nil)
+    }
+
+    func selectNotesFolder() {
+        ensureWindowController().viewModel.selectNotesFolder()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        windowController = OverlayWindowController()
-        windowController?.preload()
+        Telemetry.start()
+        Telemetry.addBreadcrumb("Application launched", category: "lifecycle")
+        UpdateManager.shared.start()
+
+        ensureWindowController().preload()
 
         // Start clipboard monitor early
         _ = ClipboardMonitor.shared
 
         // Single shortcut: Option+Space
         HotkeyManager.shared.register { [weak self] in
-            self?.windowController?.toggle()
+            self?.toggleOverlay()
         }
 
         Task {

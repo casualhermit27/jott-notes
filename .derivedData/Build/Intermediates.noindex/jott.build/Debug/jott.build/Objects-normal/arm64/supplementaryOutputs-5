@@ -1,23 +1,23 @@
 {
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/CaptureInputView.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CaptureInputView.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CaptureInputView.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CaptureInputView.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CaptureInputView.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/CaptureInputView.swiftdeps"
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/LibraryView.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryView.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryView.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryView.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryView.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryView.swiftdeps"
   },
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/DetailView.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/DetailView.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/DetailView.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/DetailView.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/DetailView.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/DetailView.swiftdeps"
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/MeetingsListView.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/MeetingsListView.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/MeetingsListView.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/MeetingsListView.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/MeetingsListView.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/MeetingsListView.swiftdeps"
   },
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/InputOnlyView.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/InputOnlyView.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/InputOnlyView.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/InputOnlyView.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/InputOnlyView.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/InputOnlyView.swiftdeps"
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/NoteGraphViews.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteGraphViews.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteGraphViews.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteGraphViews.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteGraphViews.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/NoteGraphViews.swiftdeps"
   }
 }

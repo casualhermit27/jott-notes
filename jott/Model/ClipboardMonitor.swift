@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Combine
 
 /// Watches the system pasteboard for text changes.
 /// When the user copies text, `pendingText` is set.
@@ -10,29 +11,33 @@ final class ClipboardMonitor {
 
     private(set) var pendingText: String?
     private var pendingTextDate: Date?
-    private var lastChangeCount: Int
-    private var timer: Timer?
+    private var lastObservedChangeCount: Int
+    private var cancellables = Set<AnyCancellable>()
 
     private init() {
-        lastChangeCount = NSPasteboard.general.changeCount
+        lastObservedChangeCount = NSPasteboard.general.changeCount
         startMonitoring()
     }
 
     private func startMonitoring() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.checkClipboard() }
-        }
-    }
+        Timer.publish(every: 0.15, on: .main, in: .common)
+            .autoconnect()
+            .map { _ in NSPasteboard.general.changeCount }
+            .removeDuplicates()
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] newCount in
+                guard let self else { return }
+                guard newCount != self.lastObservedChangeCount else { return }
+                self.lastObservedChangeCount = newCount
 
-    private func checkClipboard() {
-        let pb = NSPasteboard.general
-        guard pb.changeCount != lastChangeCount else { return }
-        lastChangeCount = pb.changeCount
-        if let text = pb.string(forType: .string), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            pendingText = text
-            pendingTextDate = Date()
-        }
+                let pb = NSPasteboard.general
+                if let text = pb.string(forType: .string),
+                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.pendingText = text
+                    self.pendingTextDate = Date()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     /// Returns and clears pending text only if it was copied within the last 60 seconds.
@@ -54,4 +59,12 @@ final class ClipboardMonitor {
         pendingText = nil
         pendingTextDate = nil
     }
+
+#if DEBUG
+    /// Test-only helper to seed clipboard state without touching NSPasteboard.
+    func seedPendingTextForTesting(_ text: String?, copiedAt: Date?) {
+        pendingText = text
+        pendingTextDate = copiedAt
+    }
+#endif
 }

@@ -1,4 +1,11 @@
 {
+  "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/RemindersListView.swift" : {
+    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.swiftconstvalues",
+    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.d",
+    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.dia",
+    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.o",
+    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/RemindersListView.swiftdeps"
+  },
   "/Users/harshachaganti/Documents/work/jott-notes/jott/Views/SaveConfirmationView.swift" : {
     "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/SaveConfirmationView.swiftconstvalues",
     "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/SaveConfirmationView.d",
@@ -12,12 +19,5 @@
     "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/UnifiedJottView.dia",
     "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/UnifiedJottView.o",
     "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/UnifiedJottView.swiftdeps"
-  },
-  "/Users/harshachaganti/Documents/work/jott-notes/jott/Window/LibraryWindowController.swift" : {
-    "const-values" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.swiftconstvalues",
-    "dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.d",
-    "diagnostics" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.dia",
-    "object" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.o",
-    "swift-dependencies" : "/Users/harshachaganti/Documents/work/jott-notes/.derivedData/Build/Intermediates.noindex/jott.build/Debug/jott.build/Objects-normal/arm64/LibraryWindowController.swiftdeps"
   }
 }
