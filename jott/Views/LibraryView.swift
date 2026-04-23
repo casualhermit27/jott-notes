@@ -213,6 +213,11 @@ struct LibraryView: View {
             .task(id: selectionSyncSignature) {
                 syncSelection()
             }
+            .onChange(of: viewModel.selectedNote?.id) { _, newID in
+                if let newID {
+                    withAnimation(JottMotion.content) { selectedItem = .note(newID) }
+                }
+            }
             // Debounced search — 180ms wait, then run off main thread
             .task(id: searchText) {
                 guard !searchText.isEmpty else {
@@ -834,21 +839,23 @@ private struct LibraryMinimalNoteCard: View {
         let ds = JottDS(isDark: isDarkMode)
 
         ZStack(alignment: .top) {
-            // ── Stacked indicator (2 layers for subnotes) ──
+            // ── Stacked border layers for subnotes ──
             if subnoteCount > 0 {
-                // Second layer (further back)
+                // Back layer
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isDarkMode ? Color(white: 0.08) : Color(white: 0.95))
-                    .opacity(0.5)
-                    .padding(.horizontal, 8)
-                    .offset(x: 8, y: 8)
+                    .fill(isDarkMode ? Color(white: 0.06) : Color(white: 0.96))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(isDarkMode ? Color(white: 0.22) : Color(white: 0.82), lineWidth: 1))
+                    .padding(.horizontal, 10)
+                    .offset(y: 7)
 
-                // First layer (closer)
+                // Middle layer
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isDarkMode ? Color(white: 0.08) : Color(white: 0.95))
-                    .opacity(0.65)
-                    .padding(.horizontal, 8)
-                    .offset(x: 4, y: 4)
+                    .fill(isDarkMode ? Color(white: 0.07) : Color(white: 0.97))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(isDarkMode ? Color(white: 0.25) : Color(white: 0.84), lineWidth: 1))
+                    .padding(.horizontal, 5)
+                    .offset(y: 3.5)
             }
 
             // ── Main card ──

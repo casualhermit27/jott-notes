@@ -184,24 +184,24 @@ private struct SubnoteRowCard: View {
 
                 // Buttons outside the box — only for root level
                 if !isEditing && depth == 0 {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         // Open button
                         Button(action: { viewModel.openSubnote(note) }) {
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.system(size: 9, weight: .semibold))
                                 .foregroundColor(.white)
-                                .frame(width: 24, height: 24)
+                                .frame(width: 18, height: 18)
                         }
-                        .background(accent.opacity(hovered ? 0.75 : 0.55), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .background(accent.opacity(hovered ? 0.75 : 0.55), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
 
                         // Delete button
                         Button(action: { withAnimation(JottMotion.content) { onDelete(note) } }) {
                             Image(systemName: "trash")
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(.system(size: 8, weight: .semibold))
                                 .foregroundColor(.white)
-                                .frame(width: 24, height: 24)
+                                .frame(width: 18, height: 18)
                         }
-                        .background(Color.red.opacity(hovered ? 0.75 : 0.55), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .background(Color.red.opacity(hovered ? 0.75 : 0.55), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                     .animation(.easeInOut(duration: 0.12), value: hovered)
                 }
