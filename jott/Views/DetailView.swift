@@ -622,6 +622,25 @@ struct DetailView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 10)
                     .transition(.detailContentSwap)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let note = viewModel.selectedNote, note.parentId == nil {
+                            let subnoteCount = viewModel.subnotes(of: note.id).count
+                            if subnoteCount > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "layers.2")
+                                        .font(.system(size: 8, weight: .semibold))
+                                    Text("\(subnoteCount)")
+                                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                                }
+                                .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.75))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.12),
+                                           in: Capsule())
+                                .padding(10)
+                            }
+                        }
+                    }
                 }
 
                 if let note = viewModel.selectedNote, !viewModel.isEditingNote,

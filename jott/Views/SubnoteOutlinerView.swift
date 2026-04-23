@@ -171,7 +171,7 @@ private struct SubnoteRowCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 rowContent
                     .contextMenu {
                         Button("Edit") { startEditing() }
@@ -184,34 +184,33 @@ private struct SubnoteRowCard: View {
 
                 // Buttons outside the box — only for root level
                 if !isEditing && depth == 0 {
-                    VStack(spacing: 6) {
+                    HStack(spacing: 6) {
                         // Open button
                         Button {
                             viewModel.openSubnote(note)
                         } label: {
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.secondary.opacity(hovered ? 0.65 : 0.40))
-                                .frame(width: 22, height: 22)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 20, height: 20)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.82, pressedOpacity: 0.70))
+                        .background(accent.opacity(hovered ? 0.70 : 0.50), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.80, pressedOpacity: 0.65))
 
                         // Delete button
                         Button {
                             withAnimation(JottMotion.content) { onDelete(note) }
                         } label: {
                             Image(systemName: "trash")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.secondary.opacity(hovered ? 0.70 : 0.35))
-                                .frame(width: 22, height: 22)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 20, height: 20)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.82, pressedOpacity: 0.70))
-
-                        Spacer()
+                        .background(Color.red.opacity(hovered ? 0.75 : 0.50), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.80, pressedOpacity: 0.65))
                     }
-                    .padding(.top, 4)
                     .animation(.easeInOut(duration: 0.12), value: hovered)
                 }
             }
