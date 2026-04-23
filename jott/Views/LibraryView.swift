@@ -1049,13 +1049,51 @@ private struct LibraryNoteDetailPanel: View {
             VStack(spacing: 0) {
                 // ── Header ──
                 HStack(spacing: 8) {
-                    // Mono meta: date · relative time
-                    Text("\(formattedDate)  ·  \(relativeTimeLabel)")
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundColor(ds.inkFaint)
-                        .tracking(0.3)
+                    // Back button when inside a subnote
+                    if viewModel.navigationStack.count > 1 {
+                        Button(action: {
+                            viewModel.popNavigation()
+                        }) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 10, weight: .semibold))
+                                let parentNote = viewModel.navigationStack.dropLast().last
+                                let parentTitle = parentNote?.text
+                                    .components(separatedBy: "\n")
+                                    .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? "Back"
+                                Text(parentTitle ?? "Back")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                            }
+                            .foregroundColor(squishColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(squishColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        // Mono meta: date · relative time
+                        Text("\(formattedDate)  ·  \(relativeTimeLabel)")
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundColor(ds.inkFaint)
+                            .tracking(0.3)
+                    }
 
                     Spacer()
+
+                    // Open in editor
+                    Button {
+                        viewModel.openNoteInEditor(note)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(ds.inkFaint)
+                            .frame(width: 26, height: 26)
+                            .background(isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open .md file in default editor")
 
                     // Expand
                     Button {
