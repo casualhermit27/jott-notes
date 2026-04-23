@@ -171,42 +171,15 @@ private struct SubnoteRowCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .top, spacing: 10) {
-                rowContent
-                    .contextMenu {
-                        Button("Edit") { startEditing() }
-                        if depth < maxDepth {
-                            Button("Add child") { addChild() }
-                        }
-                        Divider()
-                        Button("Delete", role: .destructive) { onDelete(note) }
+            rowContent
+                .contextMenu {
+                    Button("Edit") { startEditing() }
+                    if depth < maxDepth {
+                        Button("Add child") { addChild() }
                     }
-
-                // Buttons outside the box — only for root level, fade in on hover
-                if !isEditing && depth == 0 {
-                    HStack(spacing: 4) {
-                        Button(action: { viewModel.openSubnote(note) }) {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(accent)
-                                .frame(width: 16, height: 16)
-                                .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-
-                        Button(action: { withAnimation(JottMotion.content) { onDelete(note) } }) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 7.5, weight: .semibold))
-                                .foregroundColor(.red.opacity(0.85))
-                                .frame(width: 16, height: 16)
-                                .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .opacity(hovered ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.15), value: hovered)
+                    Divider()
+                    Button("Delete", role: .destructive) { onDelete(note) }
                 }
-            }
 
             // Children indented
             if hasChildren {
@@ -238,13 +211,11 @@ private struct SubnoteRowCard: View {
 
     @ViewBuilder
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 0) {
-            // Leading dot — top-aligned so it stays pinned when editor grows
+        HStack(alignment: .center, spacing: 8) {
+            // Leading dot
             Circle()
-                .fill(isEditing ? accent.opacity(0.80) : accent.opacity(hovered ? 0.55 : 0.35))
+                .fill(isEditing ? accent.opacity(0.80) : accent.opacity(hovered ? 0.60 : 0.35))
                 .frame(width: 5, height: 5)
-                .padding(.top, 9)
-                .padding(.trailing, 10)
                 .animation(.easeInOut(duration: 0.12), value: isEditing)
                 .animation(.easeInOut(duration: 0.12), value: hovered)
 
@@ -258,9 +229,7 @@ private struct SubnoteRowCard: View {
                     onDismiss: { commitEdit() }
                 )
                 .frame(height: editHeight)
-                .onChange(of: editingId) { _, _ in
-                    editHeight = SubnoteTextEditor.minHeight
-                }
+                .onChange(of: editingId) { _, _ in editHeight = SubnoteTextEditor.minHeight }
                 .onDisappear { if editingId == note.id { commitEdit() } }
             } else {
                 Text(firstLine)
@@ -271,6 +240,31 @@ private struct SubnoteRowCard: View {
                     .contentShape(Rectangle())
                     .onTapGesture { startEditing() }
             }
+
+            // Action buttons — trailing, only root, fade in on hover
+            if !isEditing && depth == 0 {
+                HStack(spacing: 4) {
+                    Button(action: { viewModel.openSubnote(note) }) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundColor(accent)
+                            .frame(width: 16, height: 16)
+                            .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { withAnimation(JottMotion.content) { onDelete(note) } }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 7.5, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.85))
+                            .frame(width: 16, height: 16)
+                            .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .opacity(hovered ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: hovered)
+            }
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 10)
@@ -279,12 +273,10 @@ private struct SubnoteRowCard: View {
                 .fill(rowFill)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(
-                            isEditing ? accent.opacity(0.30) : Color.clear,
-                            lineWidth: 1
-                        )
+                        .strokeBorder(isEditing ? accent.opacity(0.30) : Color.clear, lineWidth: 1)
                 )
         )
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.10)) { hovered = hovering }
         }
