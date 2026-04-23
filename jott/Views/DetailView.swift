@@ -807,23 +807,39 @@ private struct DetailHeader: View {
         .jottAccentGreen
     }
 
+    var computedBackLabel: String {
+        let isInSubnoteNav = viewModel.navigationStack.count > 1
+        guard isInSubnoteNav, let parent = viewModel.navigationStack.dropLast().last else { return "Back" }
+        let lines = parent.text.components(separatedBy: "\n")
+        let firstLine = lines.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        return firstLine.isEmpty ? "Back" : firstLine
+    }
+
     var body: some View {
         HStack(spacing: 6) {
-            // Back
+            // Back button — handle subnote navigation stack
+            let isInSubnoteNav = viewModel.navigationStack.count > 1
+            let backLabel = computedBackLabel
+
             Button(action: {
                 withAnimation(JottMotion.panel) {
                     if let note = viewModel.selectedNote, viewModel.isEditingNote {
                         viewModel.saveEditedNote(note)
                     }
-                    viewModel.selectedNote     = nil
-                    viewModel.selectedReminder = nil
+                    if isInSubnoteNav {
+                        viewModel.popNavigation()
+                    } else {
+                        viewModel.selectedNote     = nil
+                        viewModel.selectedReminder = nil
+                    }
                 }
             }) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 10, weight: .semibold))
-                    Text("Back")
+                    Text(backLabel.isEmpty ? "Back" : backLabel)
                         .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 9)
@@ -1139,27 +1155,92 @@ struct NoteDetailContent: View {
     @ObservedObject var viewModel: OverlayViewModel
 
     @State private var isDragTargeted = false
+    @State private var titleSuggestion: String? = nil
+    @State private var titleTask: Task<Void, Never>? = nil
 
     private static let imageExtensions: Set<String> = [
         "jpg","jpeg","png","gif","webp","heic","bmp","tiff","svg"
     ]
+    private static let inlineImageRegex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^)]+)\)"#)
+
+    private var titleLine: String {
+        let lines = note.text.components(separatedBy: "\n")
+        for line in lines {
+            guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if containsImageMarkup(line) { continue }
+            let cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { return cleaned }
+        }
+        return ""
+    }
+
+    private var bodyText: String {
+        let lines = note.text.components(separatedBy: "\n")
+        guard let titleIndex = lines.firstIndex(where: { line in
+            guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            return !containsImageMarkup(line)
+        }) else {
+            return note.text
+        }
+        return lines.dropFirst(titleIndex + 1).joined(separator: "\n")
+            .trimmingCharacters(in: .newlines)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if viewModel.isEditingNote {
-                TextEditor(text: $viewModel.editingNoteText)
-                    .font(.system(size: 15))
-                    .foregroundColor(viewModel.isDarkMode ? .white : .black)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .frame(minHeight: 200)
+                // Title suggestion chip
+                if let title = titleSuggestion {
+                    AISuggestionChip(
+                        label: title,
+                        icon: "sparkles",
+                        isDark: viewModel.isDarkMode,
+                        onApply: {
+                            let lines = viewModel.editingNoteText.components(separatedBy: "\n")
+                            let rest = lines.dropFirst().joined(separator: "\n")
+                            viewModel.editingNoteText = title + (rest.isEmpty ? "" : "\n" + rest)
+                            titleSuggestion = nil
+                        },
+                        onDismiss: { titleSuggestion = nil }
+                    )
+                    .padding(.bottom, 8)
+                }
+
+                NoteInlineEditor(
+                    text: $viewModel.editingNoteText,
+                    suggestion: nil,
+                    isDark: viewModel.isDarkMode,
+                    onTextChange: { newText in scheduleAI(for: newText) },
+                    onSuggestionAccepted: {},
+                    onSuggestionDismissed: {}
+                )
+                .frame(minHeight: 200)
             } else {
                 VStack(alignment: .leading, spacing: 16) {
-                    NoteRichContentView(
-                        text: note.text,
-                        isDarkMode: viewModel.isDarkMode,
-                        onTap: { viewModel.startEditingNote(note) }
-                    )
+                    // Serif title — first non-empty line
+                    if !titleLine.isEmpty {
+                        Text(titleLine)
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                            .foregroundColor(.primary.opacity(0.92))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .onTapGesture(count: 2) { viewModel.startEditingNote(note) }
+                    }
+
+                    // Body — remaining lines (skip if empty)
+                    if !bodyText.isEmpty {
+                        NoteRichContentView(
+                            text: bodyText,
+                            isDarkMode: viewModel.isDarkMode,
+                            onTap: { viewModel.startEditingNote(note) }
+                        )
+                    } else if titleLine.isEmpty {
+                        // Single-line or empty — fall back to full render
+                        NoteRichContentView(
+                            text: note.text,
+                            isDarkMode: viewModel.isDarkMode,
+                            onTap: { viewModel.startEditingNote(note) }
+                        )
+                    }
 
                     // Only show subnote outliner for root notes
                     if note.parentId == nil {
@@ -1198,6 +1279,31 @@ struct NoteDetailContent: View {
                 }
             }
         }
+        .onChange(of: viewModel.isEditingNote) { _, editing in
+            if !editing { clearAI() }
+        }
+        .onChange(of: note.id) { _, _ in clearAI() }
+    }
+
+    // MARK: - AI helpers
+
+    private func scheduleAI(for text: String) {
+        // Title: 2s debounce
+        titleTask?.cancel()
+        titleTask = Task {
+            try? await Task.sleep(for: .seconds(2.0))
+            guard !Task.isCancelled else { return }
+            let result = await NoteAIService.shared.suggestTitle(for: text)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.18)) { titleSuggestion = result }
+            }
+        }
+    }
+
+    private func clearAI() {
+        titleTask?.cancel()
+        titleSuggestion = nil
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) {
@@ -1238,6 +1344,226 @@ struct NoteDetailContent: View {
         viewModel.updateNote(note, text: newText)
         // Refresh selectedNote so the view re-renders with the new attachment
         viewModel.selectedNote = NoteStore.shared.note(for: note.id) ?? note
+    }
+
+    private func containsImageMarkup(_ line: String) -> Bool {
+        guard let regex = Self.inlineImageRegex else { return false }
+        return regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
+    }
+}
+
+// MARK: - Note Inline Editor (ghost-text autocomplete)
+
+private struct NoteInlineEditor: NSViewRepresentable {
+    @Binding var text: String
+    var suggestion: String?
+    var isDark: Bool
+    var onTextChange: ((String) -> Void)?
+    var onSuggestionAccepted: () -> Void
+    var onSuggestionDismissed: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let sv = NSScrollView()
+        sv.hasVerticalScroller = true
+        sv.drawsBackground = false
+        sv.borderType = .noBorder
+        sv.autohidesScrollers = true
+
+        let tv = DetailNoteTextView()
+        tv.delegate = context.coordinator
+        tv.isRichText = true
+        tv.isEditable = true
+        tv.isSelectable = true
+        tv.drawsBackground = false
+        tv.backgroundColor = .clear
+        tv.font = .systemFont(ofSize: 15)
+        tv.isHorizontallyResizable = false
+        tv.isVerticallyResizable = true
+        tv.autoresizingMask = [.width]
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.heightTracksTextView = false
+        tv.textContainer?.lineFragmentPadding = 0
+        tv.textContainerInset = .zero
+        tv.registerForDraggedTypes([.fileURL, .png, .tiff, .string])
+
+        sv.documentView = tv
+        context.coordinator.textView = tv
+        DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
+        return sv
+    }
+
+    func updateNSView(_ sv: NSScrollView, context: Context) {
+        guard let tv = sv.documentView as? DetailNoteTextView else { return }
+        let coord = context.coordinator
+        coord.parent = self
+
+        let textColor: NSColor = isDark
+            ? .white.withAlphaComponent(0.90)
+            : .black.withAlphaComponent(0.85)
+        let ghostColor: NSColor = isDark
+            ? NSColor(white: 0.72, alpha: 0.42)
+            : NSColor(white: 0.58, alpha: 0.72)
+        let font = NSFont.systemFont(ofSize: 15)
+
+        let targetString = text + (suggestion ?? "")
+
+        if tv.textStorage?.string != targetString {
+            let savedSel = tv.selectedRange()
+
+            let attrStr = NSMutableAttributedString(
+                string: text,
+                attributes: [.font: font, .foregroundColor: textColor]
+            )
+            if let sug = suggestion, !sug.isEmpty {
+                attrStr.append(NSAttributedString(
+                    string: sug,
+                    attributes: [.font: font, .foregroundColor: ghostColor]
+                ))
+                coord.ghostStart = text.utf16.count
+            } else {
+                coord.ghostStart = nil
+            }
+
+            tv.textStorage?.setAttributedString(attrStr)
+            let clampedLoc = min(savedSel.location, text.utf16.count)
+            tv.setSelectedRange(NSRange(location: clampedLoc, length: 0))
+        }
+    }
+
+    // MARK: - Coordinator
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: NoteInlineEditor
+        weak var textView: NSTextView?
+        /// UTF-16 offset where ghost text starts in storage. nil when no ghost.
+        var ghostStart: Int? = nil
+
+        init(_ parent: NoteInlineEditor) { self.parent = parent }
+
+        // Strip ghost before any user edit so textDidChange sees clean text.
+        func textView(_ tv: NSTextView,
+                      shouldChangeTextIn range: NSRange,
+                      replacementString: String?) -> Bool {
+            guard let gs = ghostStart else { return true }
+            let totalLen = tv.textStorage?.length ?? 0
+            if totalLen > gs {
+                tv.textStorage?.deleteCharacters(in: NSRange(location: gs, length: totalLen - gs))
+            }
+            ghostStart = nil
+            DispatchQueue.main.async { self.parent.onSuggestionDismissed() }
+            return true
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = textView else { return }
+            let newText = tv.string   // ghost already stripped by shouldChangeTextIn
+            parent.text = newText
+            parent.onTextChange?(newText)
+        }
+
+        func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
+            // Tab → accept ghost text
+            if sel == #selector(NSResponder.insertTab(_:)), let gs = ghostStart {
+                guard let storage = tv.textStorage else { return false }
+                let totalLen = storage.length
+                let ghostLen = totalLen - gs
+                if ghostLen > 0 {
+                    let ghostText = (storage.string as NSString).substring(from: gs)
+                    let realAttrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.systemFont(ofSize: 15),
+                        .foregroundColor: parent.isDark
+                            ? NSColor.white.withAlphaComponent(0.90)
+                            : NSColor.black.withAlphaComponent(0.85)
+                    ]
+                    storage.setAttributes(realAttrs, range: NSRange(location: gs, length: ghostLen))
+                    ghostStart = nil
+                    parent.text = storage.string
+                    parent.onSuggestionAccepted()
+                    tv.setSelectedRange(NSRange(location: storage.length, length: 0))
+                    _ = ghostText  // silence unused warning
+                }
+                return true
+            }
+            // Escape → dismiss ghost
+            if sel == #selector(NSResponder.cancelOperation(_:)), let gs = ghostStart {
+                let totalLen = tv.textStorage?.length ?? 0
+                if totalLen > gs {
+                    tv.textStorage?.deleteCharacters(in: NSRange(location: gs, length: totalLen - gs))
+                }
+                ghostStart = nil
+                parent.onSuggestionDismissed()
+                return true
+            }
+            return false
+        }
+
+        // Keep cursor out of ghost region
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = textView, let gs = ghostStart else { return }
+            let sel = tv.selectedRange()
+            if sel.location > gs {
+                tv.setSelectedRange(NSRange(location: gs, length: 0))
+            }
+        }
+    }
+}
+
+// MARK: - AI Suggestion Chip
+
+private struct AISuggestionChip: View {
+    let label: String
+    let icon: String
+    let isDark: Bool
+    let onApply: () -> Void
+    let onDismiss: () -> Void
+
+    private var accent: Color {
+        isDark ? Color(red: 0.58, green: 0.50, blue: 0.92) : Color(red: 0.42, green: 0.30, blue: 0.76)
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(accent.opacity(0.80))
+
+            Text(label)
+                .font(.system(size: 11.5))
+                .foregroundColor(isDark ? Color.white.opacity(0.48) : Color.black.opacity(0.42))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 4)
+
+            Button("Apply") { onApply() }
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(accent)
+                .buttonStyle(.plain)
+
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(isDark ? Color.white.opacity(0.28) : Color.black.opacity(0.22))
+                    .frame(width: 14, height: 14)
+                    .background(Circle().fill(isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(accent.opacity(isDark ? 0.07 : 0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(accent.opacity(isDark ? 0.22 : 0.15), lineWidth: 0.5)
+                )
+        )
+        .transition(.offset(y: -4).combined(with: .opacity))
     }
 }
 
@@ -1464,6 +1790,39 @@ struct FlowLayout: Layout {
         if !currentRow.isEmpty {
             flushRow()
         }
+    }
+}
+
+// MARK: - Text view with image drag/drop support
+
+final class DetailNoteTextView: NSTextView {
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let pb = sender.draggingPasteboard
+        if pb.types?.contains(.fileURL) == true || pb.types?.contains(.tiff) == true {
+            return .copy
+        }
+        return .generic
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        return insertTransfer(from: sender.draggingPasteboard)
+    }
+
+    @discardableResult
+    func insertTransfer(from pb: NSPasteboard) -> Bool {
+        if let images = pb.readObjects(forClasses: [NSImage.self]) as? [NSImage],
+           let image = images.first {
+            let tempPath = NSTemporaryDirectory() + "clipboard_\(UUID().uuidString).png"
+            if let tiff = image.tiffRepresentation,
+               let bitmap = NSBitmapImageRep(data: tiff),
+               let pngData = bitmap.representation(using: .png, properties: [:]),
+               (try? pngData.write(to: URL(fileURLWithPath: tempPath))) != nil {
+                let mdText = "![\(UUID().uuidString)](\(tempPath))"
+                insertText(mdText, replacementRange: selectedRange())
+                return true
+            }
+        }
+        return false
     }
 }
 
