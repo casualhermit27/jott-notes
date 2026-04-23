@@ -187,24 +187,24 @@ private struct SubnoteRowCard: View {
                     HStack(spacing: 4) {
                         Button(action: { viewModel.openSubnote(note) }) {
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 8, weight: .medium))
-                                .foregroundColor(accent.opacity(0.80))
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(accent)
                                 .frame(width: 16, height: 16)
-                                .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
                         .buttonStyle(.plain)
 
                         Button(action: { withAnimation(JottMotion.content) { onDelete(note) } }) {
                             Image(systemName: "trash")
-                                .font(.system(size: 7.5, weight: .medium))
-                                .foregroundColor(.red.opacity(0.70))
+                                .font(.system(size: 7.5, weight: .semibold))
+                                .foregroundColor(.red.opacity(0.85))
                                 .frame(width: 16, height: 16)
-                                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
-                    .opacity(hovered ? 1 : 0.35)
-                    .animation(.easeInOut(duration: 0.12), value: hovered)
+                    .opacity(hovered ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.15), value: hovered)
                 }
             }
 
