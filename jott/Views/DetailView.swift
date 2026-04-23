@@ -626,13 +626,14 @@ struct DetailView: View {
                         if let note = viewModel.selectedNote, note.parentId == nil {
                             let subnoteCount = viewModel.subnotes(of: note.id).count
                             if subnoteCount > 0 {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 5) {
                                     Image(systemName: "layers.2")
-                                        .font(.system(size: 8, weight: .semibold))
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92))
                                     Text("\(subnoteCount)")
-                                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92))
                                 }
-                                .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.75))
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 5)
                                 .background(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.12),
