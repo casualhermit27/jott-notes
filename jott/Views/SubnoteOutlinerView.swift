@@ -49,12 +49,16 @@ struct SubnoteOutlinerView: View {
                         .foregroundColor(.secondary.opacity(0.40))
                         .fixedSize()
 
-                    Text("\(subnotes.count)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundColor(accent.opacity(0.70))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(accent.opacity(0.10), in: Capsule())
+                    HStack(spacing: 4) {
+                        Image(systemName: "layers.2")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("\(subnotes.count)")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(accent.opacity(0.70))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(accent.opacity(0.10), in: Capsule())
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.12))
@@ -167,15 +171,50 @@ private struct SubnoteRowCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            rowContent
-                .contextMenu {
-                    Button("Edit") { startEditing() }
-                    if depth < maxDepth {
-                        Button("Add child") { addChild() }
+            HStack(alignment: .top, spacing: 8) {
+                rowContent
+                    .contextMenu {
+                        Button("Edit") { startEditing() }
+                        if depth < maxDepth {
+                            Button("Add child") { addChild() }
+                        }
+                        Divider()
+                        Button("Delete", role: .destructive) { onDelete(note) }
                     }
-                    Divider()
-                    Button("Delete", role: .destructive) { onDelete(note) }
+
+                // Buttons outside the box — only for root level
+                if !isEditing && depth == 0 {
+                    VStack(spacing: 6) {
+                        // Open button
+                        Button {
+                            viewModel.openSubnote(note)
+                        } label: {
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.secondary.opacity(hovered ? 0.65 : 0.40))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.82, pressedOpacity: 0.70))
+
+                        // Delete button
+                        Button {
+                            withAnimation(JottMotion.content) { onDelete(note) }
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.secondary.opacity(hovered ? 0.70 : 0.35))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.82, pressedOpacity: 0.70))
+
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+                    .animation(.easeInOut(duration: 0.12), value: hovered)
                 }
+            }
 
             // Children indented
             if hasChildren {
@@ -239,38 +278,6 @@ private struct SubnoteRowCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .onTapGesture { startEditing() }
-            }
-
-            // Open button — open subnote standalone
-            if !isEditing && depth == 0 {
-                Button {
-                    viewModel.openSubnote(note)
-                } label: {
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary.opacity(hovered ? 0.65 : 0.35))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.85, pressedOpacity: 0.70))
-                .padding(.leading, 6)
-                .animation(.easeInOut(duration: 0.12), value: hovered)
-            }
-
-            // Delete button — always visible, brighter on hover
-            if !isEditing {
-                Button {
-                    withAnimation(JottMotion.content) { onDelete(note) }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.secondary.opacity(hovered ? 0.70 : 0.30))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.85, pressedOpacity: 0.70))
-                .padding(.leading, 6)
-                .animation(.easeInOut(duration: 0.12), value: hovered)
             }
         }
         .padding(.vertical, 7)
