@@ -128,7 +128,7 @@ struct LibraryView: View {
 
     private var selectedNote: Note? {
         guard case .note(let id) = selectedItem else { return nil }
-        return viewModel.getAllNotes().first(where: { $0.id == id })
+        return NoteStore.shared.allNotes().first(where: { $0.id == id })
     }
 
     private var selectionSyncSignature: String {
