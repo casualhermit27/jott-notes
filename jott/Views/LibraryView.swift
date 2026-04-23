@@ -655,6 +655,7 @@ struct LibraryView: View {
             return
         }
 
+        viewModel.navigationStack.removeAll()
         withAnimation(JottMotion.content) {
             selectedItem = .note(note.id)
             selectedNoteIDs = [note.id]
@@ -692,6 +693,7 @@ struct LibraryView: View {
             if let current = selectedNote { viewModel.saveEditedNote(current) }
             else { viewModel.cancelEditingNote() }
         }
+        viewModel.navigationStack.removeAll()
         withAnimation(JottMotion.content) {
             selectedItem = nil
             selectedNoteIDs.removeAll()

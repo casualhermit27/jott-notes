@@ -378,20 +378,25 @@ final class OverlayViewModel: ObservableObject {
 
     /// Open a subnote as a standalone note in the detail view
     func openSubnote(_ subnote: Note) {
-        // Push current note as parent if not already on stack
-        if let current = selectedNote, navigationStack.last?.id != current.id {
-            navigationStack.append(current)
+        // Always build a clean [parent, subnote] stack
+        if let current = selectedNote {
+            navigationStack = [current, subnote]
+        } else {
+            navigationStack = [subnote]
         }
-        navigationStack.append(subnote)
         selectedNote = subnote
         isEditingNote = false
     }
 
     /// Go back to the parent note
     func popNavigation() {
+        guard navigationStack.count > 1 else {
+            navigationStack.removeAll()
+            selectedNote = nil
+            return
+        }
         navigationStack.removeLast()
         selectedNote = navigationStack.last
-        if navigationStack.isEmpty { navigationStack.removeAll() }
     }
 
     func handleEscape() {
