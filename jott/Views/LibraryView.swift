@@ -816,7 +816,7 @@ private struct LibraryMinimalNoteCard: View {
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "layers.2")
+                    Image(systemName: "square.stack")
                         .font(.system(size: 9, weight: .semibold))
                     Text("\(subnoteCount)")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))

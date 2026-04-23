@@ -2,16 +2,22 @@ import AppKit
 import SwiftUI
 import Combine
 
+// Accepts first mouse so single click works without needing window focus first
+private class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 class LibraryWindowController: NSWindowController, NSWindowDelegate {
     let viewModel: OverlayViewModel
-    private var hostingView: NSHostingView<LibraryView>?
+    private var hostingView: FirstMouseHostingView<LibraryView>?
     private var cancellables = Set<AnyCancellable>()
+    private var isEnteringFullScreen = false
 
     init(viewModel: OverlayViewModel) {
         self.viewModel = viewModel
 
         let libraryView = LibraryView(viewModel: viewModel)
-        let hostingView = NSHostingView(rootView: libraryView)
+        let hostingView = FirstMouseHostingView(rootView: libraryView)
         hostingView.wantsLayer = true
         self.hostingView = hostingView
 
@@ -58,8 +64,23 @@ class LibraryWindowController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // NSWindowDelegate — full-screen lifecycle
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        isEnteringFullScreen = true
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        isEnteringFullScreen = false
+        NSApp.setActivationPolicy(.regular)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+    }
+
     // NSWindowDelegate — restore menu-bar-only mode when window closes
     func windowWillClose(_ notification: Notification) {
+        guard !isEnteringFullScreen else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             let hasOtherWindows = NSApp.windows.contains {
                 $0.isVisible && $0 !== self.window && $0.styleMask.contains(.titled)

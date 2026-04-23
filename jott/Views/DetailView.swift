@@ -627,7 +627,7 @@ struct DetailView: View {
                             let subnoteCount = viewModel.subnotes(of: note.id).count
                             if subnoteCount > 0 {
                                 HStack(spacing: 5) {
-                                    Image(systemName: "layers.2")
+                                    Image(systemName: "square.stack")
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92))
                                     Text("\(subnoteCount)")

@@ -19,6 +19,7 @@ final class OverlayViewModel: ObservableObject {
             stripCreationPrefixIfNeeded()   // strip /note , /reminder  → sets forcedTypeOverride
             detectType()
             updateCommandSelectionIfNeeded()
+            scheduleInputAutoSave()
         }
     }
     @Published var isVisible: Bool = false
@@ -33,6 +34,9 @@ final class OverlayViewModel: ObservableObject {
     @Published var selectedReminder: Reminder?
     @Published var selectedMeeting: Meeting?
     @Published private var meetings: [Meeting] = []
+
+    // Subnote navigation stack (for opening subnotes standalone)
+    @Published var navigationStack: [Note] = []
 
     // Note editing
     @Published var isEditingNote: Bool = false
@@ -53,6 +57,7 @@ final class OverlayViewModel: ObservableObject {
     private var isProcessing = false
     private var lastCommand: JottCommand?
     private var storeCancellables = Set<AnyCancellable>()
+    private var inputAutoSaveTask: Task<Void, Never>?
 
     /// Stable ID for the current open session's note
     private var sessionNoteId: UUID?
@@ -68,8 +73,8 @@ final class OverlayViewModel: ObservableObject {
     // MARK: - Position
     @AppStorage("jott_overlayPosition") var overlayPosition: String = "center"
 
-    /// Panel width adapts: full-width at center, slightly narrower at corners.
-    var panelDisplayWidth: CGFloat { overlayPosition == "center" ? 520 : 460 }
+    /// Content column width - fixed for notch panel.
+    var panelDisplayWidth: CGFloat { 460 }
 
     // MARK: - Init
     init(store: NoteStore? = nil) {
@@ -135,7 +140,7 @@ final class OverlayViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Session-based auto-save (debounced 0.6s)
+    // MARK: - Session-based auto-save (debounced 0.8s)
     /// Saves (or updates) the single note for this open session
     private func commitSession(showFeedback: Bool = true) {
         let raw = inputText.trimmingCharacters(in: .whitespaces)
@@ -245,12 +250,47 @@ final class OverlayViewModel: ObservableObject {
         }
     }
 
+    private var shouldAutoSaveInputDraft: Bool {
+        let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isVisible,
+              !raw.isEmpty,
+              raw != "?",
+              commandMode == nil,
+              !inputText.hasPrefix("/"),
+              forcedTypeOverride != .reminder else {
+            return false
+        }
+        return forcedTypeOverride == .note || detectedType == .note
+    }
+
+    private func scheduleInputAutoSave() {
+        inputAutoSaveTask?.cancel()
+        guard shouldAutoSaveInputDraft else { return }
+        inputAutoSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            self?.persistCurrentNoteDraftImmediately()
+        }
+    }
+
+    private func saveCurrentInputAsNoteDraft(showFeedback: Bool) {
+        let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
+        let id = sessionNoteId ?? UUID()
+        sessionNoteId = id
+        store.upsertNote(Note(id: id, text: raw, parentId: subnoteParentId))
+        if showFeedback {
+            showStoreFeedback(success: "Note saved", icon: "note.text")
+        }
+    }
+
     func persistCurrentNoteDraftImmediately() {
         let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
         guard forcedTypeOverride != .reminder else { return }
-        guard !raw.hasPrefix("/") || isForcedCreationMode else { return }
-        commitSession(showFeedback: false)
+        guard commandMode == nil else { return }
+        guard !raw.hasPrefix("/") else { return }
+        saveCurrentInputAsNoteDraft(showFeedback: false)
         objectWillChange.send()
     }
 
@@ -297,17 +337,15 @@ final class OverlayViewModel: ObservableObject {
         isEditingNote = false
         autoSaveStatus = ""
 
-        if let copied = ClipboardMonitor.shared.consume() {
-            inputText = copied
-            clipboardPrefilled = true
-        } else {
-            inputText = ""
-            clipboardPrefilled = false
-        }
+        inputText = ""
+        pendingClipboardKind = ClipboardMonitor.shared.peekKind()
+        pendingClipboardText = ClipboardMonitor.shared.peek()
+        clipboardPrefilled = pendingClipboardKind != nil
         isVisible = true
     }
 
     func dismiss() {
+        inputAutoSaveTask?.cancel()
         // Save before we close
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty && text != "?" && (!text.hasPrefix("/") || isForcedCreationMode) {
@@ -335,6 +373,26 @@ final class OverlayViewModel: ObservableObject {
     }
 
     func toggle() { isVisible ? dismiss() : show() }
+
+    // MARK: - Subnote Navigation
+
+    /// Open a subnote as a standalone note in the detail view
+    func openSubnote(_ subnote: Note) {
+        // Push current note as parent if not already on stack
+        if let current = selectedNote, navigationStack.last?.id != current.id {
+            navigationStack.append(current)
+        }
+        navigationStack.append(subnote)
+        selectedNote = subnote
+        isEditingNote = false
+    }
+
+    /// Go back to the parent note
+    func popNavigation() {
+        navigationStack.removeLast()
+        selectedNote = navigationStack.last
+        if navigationStack.isEmpty { navigationStack.removeAll() }
+    }
 
     func handleEscape() {
         if selectedNote != nil || selectedReminder != nil {
@@ -548,9 +606,25 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Clipboard
     @Published var clipboardPrefilled: Bool = false
+    @Published var pendingClipboardKind: ClipboardPendingKind? = nil
+    @Published var pendingClipboardText: String? = nil
 
     func clearClipboardPrefill() {
-        inputText = ""
+        ClipboardMonitor.shared.clear()
+        pendingClipboardKind = nil
+        pendingClipboardText = nil
+        clipboardPrefilled = false
+    }
+
+    func insertPendingClipboardText() {
+        guard let copied = ClipboardMonitor.shared.consume() else {
+            clearClipboardPrefill()
+            return
+        }
+        let separator = inputText.isEmpty ? "" : "\n"
+        inputText += separator + copied
+        pendingClipboardKind = nil
+        pendingClipboardText = nil
         clipboardPrefilled = false
     }
 
@@ -788,6 +862,7 @@ final class OverlayViewModel: ObservableObject {
     /// Unified creation — works for both commandMode and forcedType (Enter key handler).
     /// Saves, shows feedback, clears input for next entry — does NOT dismiss.
     func createCurrentItem() {
+        inputAutoSaveTask?.cancel()
         if commandMode != nil {
             createFromCommandMode()
             return
@@ -828,21 +903,7 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Smart Recall
     var smartRecallResults: [TimelineItem] {
-        guard commandMode == nil,
-              !isForcedCreationMode,
-              !inputText.hasPrefix("/"),
-              inputText.count >= 2 else { return [] }
-        let q = inputText.lowercased()
-        var results: [TimelineItem] = []
-        // Search all notes (including subnotes) — root notes first, then subnotes
-        let all = store.allNotes().filter { $0.text.lowercased().contains(q) }
-        let rootMatches = all.filter { $0.parentId == nil }
-        let subMatches  = all.filter { $0.parentId != nil }
-        let matchingReminders = getAllReminders().filter { $0.text.lowercased().contains(q) }
-        results += rootMatches.prefix(2).map { .note($0) }
-        results += subMatches.prefix(2).map { .note($0) }
-        results += matchingReminders.prefix(2).map { .reminder($0) }
-        return Array(results.prefix(5))
+        []
     }
 
     var isSmartRecalling: Bool { !smartRecallResults.isEmpty }

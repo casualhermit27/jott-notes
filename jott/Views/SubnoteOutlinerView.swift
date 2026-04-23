@@ -50,7 +50,7 @@ struct SubnoteOutlinerView: View {
                         .fixedSize()
 
                     HStack(spacing: 4) {
-                        Image(systemName: "layers.2")
+                        Image(systemName: "square.stack")
                             .font(.system(size: 8, weight: .semibold))
                         Text("\(subnotes.count)")
                             .font(.system(size: 9, weight: .bold, design: .rounded))
