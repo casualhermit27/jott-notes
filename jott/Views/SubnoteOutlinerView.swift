@@ -182,27 +182,28 @@ private struct SubnoteRowCard: View {
                         Button("Delete", role: .destructive) { onDelete(note) }
                     }
 
-                // Buttons outside the box — only for root level
+                // Buttons outside the box — only for root level, fade in on hover
                 if !isEditing && depth == 0 {
-                    HStack(spacing: 6) {
-                        // Open button
+                    HStack(spacing: 4) {
                         Button(action: { viewModel.openSubnote(note) }) {
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 18, height: 18)
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(accent.opacity(0.80))
+                                .frame(width: 16, height: 16)
+                                .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
-                        .background(accent.opacity(hovered ? 0.75 : 0.55), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .buttonStyle(.plain)
 
-                        // Delete button
                         Button(action: { withAnimation(JottMotion.content) { onDelete(note) } }) {
                             Image(systemName: "trash")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 18, height: 18)
+                                .font(.system(size: 7.5, weight: .medium))
+                                .foregroundColor(.red.opacity(0.70))
+                                .frame(width: 16, height: 16)
+                                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
-                        .background(Color.red.opacity(hovered ? 0.75 : 0.55), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .buttonStyle(.plain)
                     }
+                    .opacity(hovered ? 1 : 0.35)
                     .animation(.easeInOut(duration: 0.12), value: hovered)
                 }
             }
