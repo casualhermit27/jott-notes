@@ -805,43 +805,26 @@ private struct LibraryMinimalNoteCard: View {
     private var subnoteButtonsOverlay: some View {
         let ds = JottDS(isDark: isDarkMode)
         if subnoteCount > 0 {
-            HStack(spacing: 8) {
-                // Toggle preview pill
-                Button {
-                    withAnimation(.easeInOut(duration: 0.20)) {
-                        showSubnotes.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "layers.2")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("\(subnoteCount)")
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        Image(systemName: showSubnotes ? "chevron.down" : "chevron.up")
-                            .font(.system(size: 7, weight: .semibold))
-                    }
-                    .foregroundColor(ds.accent.opacity(isDarkMode ? 0.85 : 0.75))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Capsule(style: .continuous).fill(ds.accentSoft.opacity(isDarkMode ? 0.88 : 0.92)))
-                    .overlay(Capsule(style: .continuous).strokeBorder(ds.accent.opacity(showSubnotes ? 0.45 : (isDarkMode ? 0.25 : 0.12)), lineWidth: 0.8))
+            Button {
+                withAnimation(.easeInOut(duration: 0.20)) {
+                    showSubnotes.toggle()
                 }
-                .buttonStyle(.plain)
-
-                // Open first subnote button
-                if let firstSubnote = NoteStore.shared.subnotes(of: note.id).first {
-                    Button {
-                        viewModel.openSubnote(firstSubnote)
-                    } label: {
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 18, height: 18)
-                    }
-                    .background(ds.accent.opacity(0.65), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.80, pressedOpacity: 0.70))
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "layers.2")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("\(subnoteCount)")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    Image(systemName: showSubnotes ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 7, weight: .semibold))
                 }
+                .foregroundColor(ds.accent.opacity(isDarkMode ? 0.85 : 0.75))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Capsule(style: .continuous).fill(ds.accentSoft.opacity(isDarkMode ? 0.88 : 0.92)))
+                .overlay(Capsule(style: .continuous).strokeBorder(ds.accent.opacity(showSubnotes ? 0.45 : (isDarkMode ? 0.25 : 0.12)), lineWidth: 0.8))
             }
+            .buttonStyle(.plain)
             .padding(.trailing, 10)
             .padding(.bottom, 10)
         }
@@ -851,11 +834,19 @@ private struct LibraryMinimalNoteCard: View {
         let ds = JottDS(isDark: isDarkMode)
 
         ZStack(alignment: .top) {
-            // ── Minimal stacked indicator (one layer for subnotes) ──
+            // ── Stacked indicator (2 layers for subnotes) ──
             if subnoteCount > 0 {
+                // Second layer (further back)
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isDarkMode ? Color(white: 0.08) : Color(white: 0.95))
-                    .opacity(0.6)
+                    .opacity(0.5)
+                    .padding(.horizontal, 8)
+                    .offset(x: 8, y: 8)
+
+                // First layer (closer)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isDarkMode ? Color(white: 0.08) : Color(white: 0.95))
+                    .opacity(0.65)
                     .padding(.horizontal, 8)
                     .offset(x: 4, y: 4)
             }
