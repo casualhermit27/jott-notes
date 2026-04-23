@@ -1,7 +1,13 @@
 import AppKit
+import SwiftUI
 
 extension NSNotification.Name {
     static let overlayDidResignKey = NSNotification.Name("overlayDidResignKey")
+}
+
+/// Shared hosting view that accepts first mouse — single click works without pre-focusing the window.
+class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 class OverlayPanel: NSPanel {
@@ -20,12 +26,13 @@ class OverlayPanel: NSPanel {
         )
         isOpaque = false
         backgroundColor = .clear
-        level = .floating
+        // Above the menu bar so the 420pt panel covers the notch area.
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
         collectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary
         ]
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         hasShadow = false   // shadow is drawn by SwiftUI so it follows the card, not the full panel
     }
@@ -46,6 +53,8 @@ class OverlayPanel: NSPanel {
     override func resignKey() {
         super.resignKey()
         guard !Self.suppressResignKey else { return }
+        let hoverFrame = frame.insetBy(dx: -8, dy: -8)
+        guard !hoverFrame.contains(NSEvent.mouseLocation) else { return }
         NotificationCenter.default.post(name: .overlayDidResignKey, object: nil)
     }
 }

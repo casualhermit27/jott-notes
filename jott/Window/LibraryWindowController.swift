@@ -2,11 +2,6 @@ import AppKit
 import SwiftUI
 import Combine
 
-// Accepts first mouse so single click works without needing window focus first
-private class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
 class LibraryWindowController: NSWindowController, NSWindowDelegate {
     let viewModel: OverlayViewModel
     private var hostingView: FirstMouseHostingView<LibraryView>?

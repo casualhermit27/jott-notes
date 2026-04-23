@@ -5,12 +5,12 @@ import Combine
 class OverlayWindowController {
     let panel: OverlayPanel
     let viewModel: OverlayViewModel
-    private var hostingView: NSHostingView<OverlayView>?
+    private var hostingView: FirstMouseHostingView<OverlayView>?
     private var cancellables = Set<AnyCancellable>()
 
-    // Panel height is fixed; width and position adapt to user preference.
-    private let panelHeight: CGFloat = 540
-    private var panelWidth: CGFloat { viewModel.panelDisplayWidth }
+    // Notch drop panel - fixed content width, anchored at top-center.
+    private let panelHeight: CGFloat = 640
+    private let notchPanelWidth: CGFloat = 460
 
     var isDarkMode: Bool { viewModel.isDarkMode }
 
@@ -18,7 +18,7 @@ class OverlayWindowController {
         self.panel  = OverlayPanel()
         self.viewModel = OverlayViewModel()
 
-        let hostingView = NSHostingView(rootView: OverlayView(viewModel: viewModel))
+        let hostingView = FirstMouseHostingView(rootView: OverlayView(viewModel: viewModel))
         hostingView.wantsLayer = true
         self.hostingView = hostingView
         panel.contentView = hostingView
@@ -49,9 +49,8 @@ class OverlayWindowController {
     }
 
     private func applyAppearance() {
-        let appearance = NSAppearance(
-            named: viewModel.isDarkMode ? .darkAqua : .aqua
-        )
+        // Notch panel is always pitch-black — force dark appearance.
+        let appearance = NSAppearance(named: .darkAqua)
         panel.appearance = appearance
         panel.contentView?.appearance = appearance
         hostingView?.appearance = appearance
@@ -63,60 +62,46 @@ class OverlayWindowController {
         guard let screen = NSScreen.screens.first(where: {
             NSMouseInRect(NSEvent.mouseLocation, $0.frame, false)
         }) ?? NSScreen.main else { return .zero }
-        let sf = screen.visibleFrame
-        let w = panelWidth
-        let x: CGFloat
-        let y: CGFloat
-        switch viewModel.overlayPosition {
-        case "topLeft":
-            x = sf.minX + 16
-            y = sf.maxY - panelHeight - 8
-        case "topRight":
-            x = sf.maxX - w - 16
-            y = sf.maxY - panelHeight - 8
-        default: // center
-            x = sf.midX - w / 2
-            y = sf.midY - panelHeight / 2
-        }
-        return CGRect(x: x, y: y, width: w, height: panelHeight)
+        // Use screen.frame (not visibleFrame) so the panel's top edge is flush
+        // with the physical top of the screen, covering the notch within the fixed panel width.
+        let sf = screen.frame
+        let x = sf.midX - notchPanelWidth / 2
+        let y = sf.maxY - panelHeight
+        return CGRect(x: x, y: y, width: notchPanelWidth, height: panelHeight)
     }
 
     func show() {
         applyAppearance()
         NSApp.activate(ignoringOtherApps: true)
-        panel.setFrame(panelFrame(), display: false)
+
+        // Ensure no leftover layer transforms from a previous animation.
+        hostingView?.layer?.removeAllAnimations()
+        hostingView?.layer?.transform = CATransform3DIdentity
+
+        let target = panelFrame()
+        var start = target
+        start.origin.y = target.origin.y + panelHeight  // above screen
+
+        panel.setFrame(start, display: false)
         panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
 
-        // Scale up from 0.94 at the bar's anchor point — Spotlight entrance feel
-        if let layer = hostingView?.layer {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            layer.transform = CATransform3DConcat(
-                CATransform3DMakeScale(0.94, 0.94, 1),
-                CATransform3DMakeTranslation(0, 6, 0)
-            )
-            CATransaction.commit()
-
-            let anim = CABasicAnimation(keyPath: "transform")
-            anim.fromValue = layer.transform
-            anim.toValue = CATransform3DIdentity
-            anim.duration = JottMotion.panelDuration
-            anim.timingFunction = JottMotion.panelEntranceTiming
-            anim.isRemovedOnCompletion = true
-            layer.add(anim, forKey: "entrance")
-
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            layer.transform = CATransform3DIdentity
-            CATransaction.commit()
+        // Animate the window frame down — window clips its own content so
+        // the spring overshoot can never expose a gap at the top.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.54
+            // steep deceleration curve: rushes out of notch, settles softly
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.08, 1.0, 0.24, 1.0)
+            ctx.allowsImplicitAnimation = true
+            panel.animator().setFrame(target, display: true)
         }
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = JottMotion.panelFadeDuration
+            ctx.duration = 0.20
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1
         }
+
         DispatchQueue.main.async { [weak self] in self?.focusTextView() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.focusTextView() }
     }
@@ -132,29 +117,18 @@ class OverlayWindowController {
     }
 
     func dismiss() {
-        if let layer = hostingView?.layer {
-            let exitTransform = CATransform3DConcat(
-                CATransform3DMakeScale(0.96, 0.96, 1),
-                CATransform3DMakeTranslation(0, 3, 0)
-            )
-            let anim = CABasicAnimation(keyPath: "transform")
-            anim.fromValue = CATransform3DIdentity
-            anim.toValue = exitTransform
-            anim.duration = JottMotion.panelDuration
-            anim.timingFunction = JottMotion.panelExitTiming
-            anim.fillMode = .forwards
-            anim.isRemovedOnCompletion = false
-            layer.add(anim, forKey: "exit")
-        }
+        let current = panel.frame
+        var exit = current
+        exit.origin.y = current.origin.y + panelHeight  // slide back up into notch
 
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = JottMotion.panelFadeDuration
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.5, 0.0, 1.0, 1.0)
+            ctx.allowsImplicitAnimation = true
+            panel.animator().setFrame(exit, display: true)
             panel.animator().alphaValue = 0
         }) { [weak self] in
             self?.panel.orderOut(nil)
-            self?.hostingView?.layer?.removeAllAnimations()
-            self?.hostingView?.layer?.transform = CATransform3DIdentity
         }
     }
 
