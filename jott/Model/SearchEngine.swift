@@ -39,63 +39,60 @@ enum SearchResult: Identifiable {
     }
 }
 
-// MARK: - Search Mode
-
-enum SearchMode: String, CaseIterable, Identifiable {
-    case normal   = "Normal"
-    case fuzzy    = "Fuzzy"
-    case semantic = "Semantic"
-
-    var id: String { rawValue }
-
-    var icon: String {
-        switch self {
-        case .normal:   return "magnifyingglass"
-        case .fuzzy:    return "sparkle.magnifyingglass"
-        case .semantic: return "brain"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .normal:   return "Normal"
-        case .fuzzy:    return "Fuzzy"
-        case .semantic: return "AI"
-        }
-    }
-}
-
 // MARK: - Search Engine
 
-@MainActor
 final class SearchEngine {
     static let shared = SearchEngine()
 
-    // Cached sentence embeddings: note id → embedding vector
-    private var embeddingCache: [UUID: [Double]] = [:]
-    private var cacheVersion: Int = 0
+    // NLEmbedding is expensive to load — keep one instance for the app lifetime
+    private let sentenceEmbedding: NLEmbedding? = NLEmbedding.sentenceEmbedding(for: .english)
 
     private init() {}
 
-    /// Main entry point — returns ranked results across root notes + subnotes.
-    func search(query: String, store: NoteStore, mode: SearchMode) -> [SearchResult] {
+    /// Main entry point — blended search across exact, fuzzy, and semantic similarity.
+    func search(query: String, store: NoteStore) -> [SearchResult] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
 
         let allNotes = store.allNotes()
-        var results: [SearchResult] = []
+        let exactResults = normalSearch(query: q, notes: allNotes, store: store)
+        let fuzzyResults = shouldUseFuzzySearch(for: q)
+            ? fuzzySearch(query: q, notes: allNotes, store: store)
+            : []
+        let semanticResults = shouldUseSemanticSearch(for: q)
+            ? semanticSearch(query: q, notes: allNotes, store: store)
+            : []
+        var merged: [UUID: SearchResult] = [:]
 
-        switch mode {
-        case .normal:
-            results = normalSearch(query: q, notes: allNotes, store: store)
-        case .fuzzy:
-            results = fuzzySearch(query: q, notes: allNotes, store: store)
-        case .semantic:
-            results = semanticSearch(query: q, notes: allNotes, store: store)
+        func merge(_ result: SearchResult, weight: Double) {
+            let weightedScore = result.score * weight
+            let candidate: SearchResult
+            switch result {
+            case .rootNote(let note, _):
+                candidate = .rootNote(note, score: weightedScore)
+            case .subnote(let note, let parent, _):
+                candidate = .subnote(note, parent: parent, score: weightedScore)
+            }
+
+            if let existing = merged[result.note.id] {
+                let combined = existing.score + weightedScore
+                switch candidate {
+                case .rootNote(let note, _):
+                    merged[result.note.id] = .rootNote(note, score: combined)
+                case .subnote(let note, let parent, _):
+                    merged[result.note.id] = .subnote(note, parent: parent, score: combined)
+                }
+            } else {
+                merged[result.note.id] = candidate
+            }
         }
 
+        exactResults.forEach { merge($0, weight: 1.0) }
+        fuzzyResults.forEach { merge($0, weight: 0.7) }
+        semanticResults.forEach { merge($0, weight: 0.85) }
+
         // Sort by score descending, then by modified date
-        return results.sorted {
+        return merged.values.sorted {
             if abs($0.score - $1.score) > 0.01 { return $0.score > $1.score }
             return $0.note.modifiedAt > $1.note.modifiedAt
         }
@@ -143,7 +140,7 @@ final class SearchEngine {
     private func fuzzySearch(query: String, notes: [Note], store: NoteStore) -> [SearchResult] {
         let q = query.lowercased()
         var results: [SearchResult] = []
-        let threshold = 0.18
+        let threshold = fuzzyThreshold(for: q)
 
         for note in notes {
             let text = noteSearchText(note)
@@ -207,13 +204,12 @@ final class SearchEngine {
     // MARK: - Semantic (NLEmbedding cosine similarity)
 
     private func semanticSearch(query: String, notes: [Note], store: NoteStore) -> [SearchResult] {
-        guard let embedding = NLEmbedding.sentenceEmbedding(for: .english) else {
-            // Fallback to fuzzy if model unavailable
+        guard let embedding = sentenceEmbedding else {
             return fuzzySearch(query: query, notes: notes, store: store)
         }
 
         var results: [SearchResult] = []
-        let threshold = 0.42  // cosine similarity threshold (0=identical, 2=opposite for NL distance)
+        let threshold = 0.30  // cosine similarity threshold (0=identical, 2=opposite for NL distance)
 
         for note in notes {
             let text = noteSearchText(note)
@@ -236,6 +232,45 @@ final class SearchEngine {
 
     private func noteSearchText(_ note: Note) -> String {
         let tags = note.tags.joined(separator: " ")
-        return "\(note.text) \(tags)".lowercased()
+        return cleanedSearchText("\(note.text) \(tags)")
+    }
+
+    private func shouldUseFuzzySearch(for query: String) -> Bool {
+        query.count >= 3
+    }
+
+    private func shouldUseSemanticSearch(for query: String) -> Bool {
+        let terms = query.split(whereSeparator: \.isWhitespace)
+        return terms.count > 1 || query.count >= 10
+    }
+
+    private func fuzzyThreshold(for query: String) -> Double {
+        switch query.count {
+        case ...4:
+            return 0.58
+        case 5...7:
+            return 0.42
+        default:
+            return 0.26
+        }
+    }
+
+    private func cleanedSearchText(_ raw: String) -> String {
+        let withoutImages = raw.replacingOccurrences(
+            of: #"\!\[[^\]]*\]\([^)]+\)"#,
+            with: " ",
+            options: .regularExpression
+        )
+        let withoutLinks = withoutImages.replacingOccurrences(
+            of: #"\[([^\]]+)\]\([^)]+\)"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        let compactWhitespace = withoutLinks.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        )
+        return compactWhitespace.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

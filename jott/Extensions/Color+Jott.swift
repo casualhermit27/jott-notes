@@ -26,15 +26,15 @@ extension Color {
 
     static var jottOverlaySurface: Color {
         Color(nsColor: jottDynamicColor(
-            light: NSColor(srgbRed: 1.000, green: 1.000, blue: 1.000, alpha: 0.54),
-            dark: NSColor(srgbRed: 0.120, green: 0.132, blue: 0.160, alpha: 0.76)
+            light: NSColor(srgbRed: 0.965, green: 0.968, blue: 0.960, alpha: 0.58),
+            dark: NSColor(srgbRed: 0.082, green: 0.090, blue: 0.112, alpha: 0.84)
         ))
     }
 
     static var jottOverlaySurfaceElevated: Color {
         Color(nsColor: jottDynamicColor(
-            light: NSColor(srgbRed: 1.000, green: 1.000, blue: 1.000, alpha: 0.66),
-            dark: NSColor(srgbRed: 0.160, green: 0.172, blue: 0.205, alpha: 0.82)
+            light: NSColor(srgbRed: 0.982, green: 0.982, blue: 0.972, alpha: 0.68),
+            dark: NSColor(srgbRed: 0.105, green: 0.112, blue: 0.138, alpha: 0.88)
         ))
     }
 
@@ -47,15 +47,15 @@ extension Color {
 
     static var jottAmbientBase: Color {
         Color(nsColor: jottDynamicColor(
-            light: NSColor(srgbRed: 0.934, green: 0.953, blue: 0.952, alpha: 1.0),
-            dark: NSColor(srgbRed: 0.075, green: 0.085, blue: 0.110, alpha: 1.0)
+            light: NSColor(srgbRed: 0.908, green: 0.922, blue: 0.918, alpha: 1.0),
+            dark: NSColor(srgbRed: 0.046, green: 0.052, blue: 0.070, alpha: 1.0)
         ))
     }
 
     static var jottAmbientSecondary: Color {
         Color(nsColor: jottDynamicColor(
-            light: NSColor(srgbRed: 0.962, green: 0.947, blue: 0.930, alpha: 1.0),
-            dark: NSColor(srgbRed: 0.110, green: 0.100, blue: 0.125, alpha: 1.0)
+            light: NSColor(srgbRed: 0.928, green: 0.912, blue: 0.892, alpha: 1.0),
+            dark: NSColor(srgbRed: 0.070, green: 0.064, blue: 0.084, alpha: 1.0)
         ))
     }
 
@@ -87,9 +87,9 @@ extension Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             switch appearance.bestMatch(from: [.darkAqua, .aqua]) {
             case .darkAqua:
-                return NSColor(srgbRed: 0.84, green: 0.90, blue: 1.0, alpha: 0.08)
+                return NSColor(srgbRed: 0.84, green: 0.90, blue: 1.0, alpha: 0.055)
             default:
-                return NSColor(srgbRed: 0.36, green: 0.40, blue: 0.52, alpha: 0.06)
+                return NSColor(srgbRed: 0.28, green: 0.31, blue: 0.38, alpha: 0.055)
             }
         })
     }

@@ -1,5 +1,7 @@
 import Foundation
+#if os(macOS)
 import AppKit
+#endif
 import Combine
 
 @MainActor
@@ -15,21 +17,39 @@ final class NoteStore: ObservableObject {
     private let appSupportDir:    URL
     private let remindersFileURL: URL
     private let clustersFileURL:  URL
+    private let foldersFileURL:   URL
+    private let notesMetaFileURL: URL
+
+    // In-memory metadata store: UUID → NoteMetadata
+    private var notesMeta: [UUID: NoteMetadata] = [:]
+
+    private struct NoteMetadata: Codable {
+        var tags:      [String]
+        var isPinned:  Bool
+        var clusterId: UUID?
+        var parentId:  UUID?
+        var folderId:  UUID?
+        var created:   Date
+        var modified:  Date
+        var filename:  String
+        var deletedAt: Date?
+    }
     @Published private(set) var clusters: [Cluster] = []
+    @Published private(set) var folders: [NoteFolder] = []
 
     private let bookmarkKey = "jott_notesFolderBookmark"
     private var securityScopedActive = false
 
-    /// UUID → slug filename mapping (e.g. UUID → "buy-milk.md")
+    /// UUID → slug filename mapping (e.g. UUID → "buy-milk.jott")
     private var noteFilenames: [UUID: String] = [:]
 
-    /// Folder where .md note files live. Falls back to <AppSupport>/Notes.
+    /// Folder where .jott note files live. Falls back to <AppSupport>/Notes.
     private(set) var notesFolder: URL
 
     private init() {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
+        ).first ?? FileManager.default.temporaryDirectory
         appSupportDir = appSupport.appending(component: "com.casualhermit.jott",
                                              directoryHint: .isDirectory)
         do {
@@ -41,8 +61,11 @@ final class NoteStore: ObservableObject {
 
         remindersFileURL = appSupportDir.appending(component: "reminders.json")
         clustersFileURL  = appSupportDir.appending(component: "clusters.json")
+        foldersFileURL   = appSupportDir.appending(component: "folders.json")
+        notesMetaFileURL = appSupportDir.appending(component: "notes-meta.json")
 
-        // Resolve user-selected folder from security-scoped bookmark, or use default
+        // Resolve notes folder
+#if os(macOS)
         let defaultFolder = appSupportDir.appending(component: "jott-notes",
                                                     directoryHint: .isDirectory)
         if let bookmarkData = UserDefaults.standard.data(forKey: "jott_notesFolderBookmark") {
@@ -72,6 +95,11 @@ final class NoteStore: ObservableObject {
         } else {
             notesFolder = defaultFolder
         }
+#else
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        notesFolder = docs.appending(component: "jott-notes", directoryHint: .isDirectory)
+#endif
 
         do {
             try FileManager.default.createDirectory(at: notesFolder,
@@ -81,10 +109,12 @@ final class NoteStore: ObservableObject {
         }
         load()
         migrateFromJSON()
+        CloudKitSyncManager.shared.sync(store: self)
     }
 
     // MARK: - Folder Selection
 
+#if os(macOS)
     func selectNotesFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -117,8 +147,9 @@ final class NoteStore: ObservableObject {
             reportError(error, context: "creating selected notes folder")
         }
         // Re-persist all cached notes into new folder
-        for note in notesCache { writeNoteMD(note) }
+        for note in notesCache { writeNoteFile(note) }
     }
+#endif
 
     // MARK: - Slug helpers
 
@@ -151,41 +182,77 @@ final class NoteStore: ObservableObject {
         return result
     }
 
-    private func generateFilename(for note: Note) -> String {
-        let firstLine = note.text.components(separatedBy: "\n").first ?? note.text
-        let slug = slugify(firstLine)
+    /// Full nested path components for a folder (root → leaf)
+    private func folderPathComponents(_ folderId: UUID) -> [String] {
+        var components: [String] = []
+        var current: UUID? = folderId
+        var visited = Set<UUID>()
+        while let cid = current {
+            guard !visited.contains(cid) else { break }  // cycle guard
+            visited.insert(cid)
+            guard let folder = folders.first(where: { $0.id == cid }) else { break }
+            let slug = slugify(folder.name)
+            let part = slug.isEmpty ? cid.uuidString.prefix(8).lowercased() : slug
+            components.insert(String(part), at: 0)
+            current = folder.parentId
+        }
+        return components
+    }
+
+    /// Subfolder URL for a given folder (creates it if needed)
+    private func folderDir(_ folderId: UUID) -> URL? {
+        let parts = folderPathComponents(folderId)
+        guard !parts.isEmpty else { return nil }
+        let dir = parts.reduce(notesFolder) { $0.appending(component: $1, directoryHint: .isDirectory) }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func generateFilename(for note: Note, in dir: URL) -> String {
+        let slug = slugify(note.title)
         let base = slug.isEmpty ? "note-\(note.id.uuidString.prefix(4).lowercased())" : slug
 
-        // Check for collisions
         let existing = Set(noteFilenames.values)
-        var candidate = "\(base).md"
+        var candidate = "\(base).jott"
         if !existing.contains(candidate),
-           !FileManager.default.fileExists(atPath: notesFolder.appending(component: candidate).path) {
+           !FileManager.default.fileExists(atPath: dir.appending(component: candidate).path) {
             return candidate
         }
         var counter = 2
         while existing.contains(candidate) ||
-                FileManager.default.fileExists(atPath: notesFolder.appending(component: candidate).path) {
-            candidate = "\(base)-\(counter).md"
+                FileManager.default.fileExists(atPath: dir.appending(component: candidate).path) {
+            candidate = "\(base)-\(counter).jott"
             counter += 1
         }
         return candidate
     }
 
     private func fileURL(for note: Note) -> URL {
+        let dir = note.folderId.flatMap { folderDir($0) } ?? notesFolder
         if let filename = noteFilenames[note.id] {
-            return notesFolder.appending(component: filename)
+            // Upgrade .md → .jott filename if we stored the legacy name
+            let jottName = filename.hasSuffix(".md")
+                ? String(filename.dropLast(3)) + ".jott"
+                : filename
+            let candidate = dir.appending(component: jottName)
+            let root      = notesFolder.appending(component: jottName)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            if FileManager.default.fileExists(atPath: root.path)      { return root }
+            return candidate
         }
-        // Generate new slug filename and remember it
-        let filename = generateFilename(for: note)
+        let filename = generateFilename(for: note, in: dir)
         noteFilenames[note.id] = filename
-        return notesFolder.appending(component: filename)
+        return dir.appending(component: filename)
     }
 
     // MARK: - MD helpers
 
-    private func attachmentsDir() -> URL {
+    func attachmentsDirectoryURL() -> URL {
         notesFolder.appending(component: "attachments", directoryHint: .isDirectory)
+    }
+
+    private func attachmentsDir() -> URL {
+        attachmentsDirectoryURL()
     }
 
     func attachmentURL(for path: String) -> URL {
@@ -221,34 +288,105 @@ final class NoteStore: ObservableObject {
             }
     }
 
-    private func writeNoteMD(_ note: Note) {
-        let iso = ISO8601DateFormatter()
-        var fmLines = [
-            "---",
-            "id: \(note.id.uuidString)",
-            "tags: \(note.tags.joined(separator: ", "))",
-            "pinned: \(note.isPinned)",
-        ]
-        if let cid = note.clusterId  { fmLines.append("cluster: \(cid.uuidString)") }
-        if let pid = note.parentId   { fmLines.append("parent: \(pid.uuidString)") }
-        fmLines += [
-            "created: \(iso.string(from: note.timestamp))",
-            "modified: \(iso.string(from: note.modifiedAt))",
-            "---",
-            "",
-        ]
-        let fm = fmLines.joined(separator: "\n")
-        let content = fm + note.text
+    private func writeNoteFile(_ note: Note) {
+        struct NoteContent: Encodable {
+            let blocks: [Block]
+            let links:  [UUID]
+        }
         do {
             try ensureNotesFolderExists()
-            try content.write(to: fileURL(for: note), atomically: true, encoding: .utf8)
+            let url = fileURL(for: note)
+            let content = NoteContent(blocks: note.blocks, links: note.links)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(content)
+            try data.write(to: url, options: .atomic)
+            // Update metadata sidecar
+            notesMeta[note.id] = NoteMetadata(
+                tags:      note.tags,
+                isPinned:  note.isPinned,
+                clusterId: note.clusterId,
+                parentId:  note.parentId,
+                folderId:  note.folderId,
+                created:   note.timestamp,
+                modified:  note.modifiedAt,
+                filename:  noteFilenames[note.id] ?? url.lastPathComponent,
+                deletedAt: note.deletedAt
+            )
+            saveNotesMeta()
             clearError()
         } catch {
             reportError(error, context: "saving note file")
         }
     }
 
-    private func readNoteMD(at url: URL) -> Note? {
+    private func saveNotesMeta() {
+        // Keyed by UUID string for JSON serialisation
+        var dict: [String: NoteMetadata] = [:]
+        for (id, meta) in notesMeta { dict[id.uuidString] = meta }
+        do {
+            let data = try JSONEncoder().encode(dict)
+            try data.write(to: notesMetaFileURL, options: .atomic)
+        } catch {
+            reportError(error, context: "saving notes-meta.json")
+        }
+    }
+
+    private func loadNotesMeta() {
+        guard let data = try? Data(contentsOf: notesMetaFileURL),
+              let dict = try? JSONDecoder().decode([String: NoteMetadata].self, from: data)
+        else { return }
+        notesMeta = Dictionary(uniqueKeysWithValues: dict.compactMap { k, v in
+            guard let id = UUID(uuidString: k) else { return nil }
+            return (id, v)
+        })
+    }
+
+    private func readNoteFile(at url: URL) -> Note? {
+        // ── .jott format: JSON {"blocks": [...], "links": [...]} ──
+        if url.pathExtension == "jott" {
+            return readNoteJott(at: url)
+        }
+        // ── .md format: migrate to .jott ──
+        return readAndMigrateMD(at: url)
+    }
+
+    private func readNoteJott(at url: URL) -> Note? {
+        struct NoteContent: Decodable {
+            let blocks: [Block]
+            let links:  [UUID]?
+        }
+        guard let data = try? Data(contentsOf: url) else {
+            reportError(URLError(.cannotOpenFile), context: "reading note file \(url.lastPathComponent)")
+            return nil
+        }
+        let content: NoteContent
+        do {
+            content = try JSONDecoder().decode(NoteContent.self, from: data)
+        } catch {
+            reportError(error, context: "decoding \(url.lastPathComponent)")
+            return nil
+        }
+        let filename = url.lastPathComponent
+        if let (id, meta) = notesMeta.first(where: { $0.value.filename == filename }) {
+            noteFilenames[id] = filename
+            return Note(id: id, blocks: content.blocks, links: content.links ?? [],
+                        tags: meta.tags, timestamp: meta.created, modifiedAt: meta.modified,
+                        fileURL: url, isPinned: meta.isPinned,
+                        clusterId: meta.clusterId, parentId: meta.parentId,
+                        folderId: meta.folderId, deletedAt: meta.deletedAt)
+        }
+        // No metadata — fresh note
+        let id = UUID()
+        noteFilenames[id] = filename
+        notesMeta[id] = NoteMetadata(tags: [], isPinned: false, clusterId: nil,
+                                     parentId: nil, folderId: nil,
+                                     created: Date(), modified: Date(), filename: filename,
+                                     deletedAt: nil)
+        return Note(id: id, blocks: content.blocks, links: content.links ?? [], fileURL: url)
+    }
+
+    private func readAndMigrateMD(at url: URL) -> Note? {
         let content: String
         do {
             content = try String(contentsOf: url, encoding: .utf8)
@@ -256,92 +394,150 @@ final class NoteStore: ObservableObject {
             reportError(error, context: "reading note file \(url.lastPathComponent)")
             return nil
         }
-        let iso = ISO8601DateFormatter()
+        let mdFilename = url.lastPathComponent
 
-        guard content.hasPrefix("---\n") else {
-            // Plain text (no frontmatter) — use filename as fallback
-            let filenameWithoutExt = url.deletingPathExtension().lastPathComponent
-            let uuidFromFilename = UUID(uuidString: filenameWithoutExt)
-            let id = uuidFromFilename ?? UUID()
-            let note = Note(id: id, text: content.trimmingCharacters(in: .whitespacesAndNewlines),
-                        fileURL: url)
-            noteFilenames[id] = url.lastPathComponent
-            return note
-        }
+        let note: Note?
 
-        let parts = content.components(separatedBy: "\n---\n")
-        guard parts.count >= 2 else {
-            let message = "Skipped corrupted frontmatter in \(url.lastPathComponent)."
-            NSLog("[Jott] \(message)")
-            lastErrorMessage = message
-            return nil
-        }
-        let frontmatter = String(parts[0].dropFirst(4))  // drop leading "---\n"
-        let body = parts.dropFirst().joined(separator: "\n---\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var idStr: String?; var tagsStr = ""; var createdStr: String?; var modStr: String?; var pinnedStr = "false"; var clusterStr: String?; var parentStr: String?
-        for line in frontmatter.components(separatedBy: "\n") {
-            let kv = line.split(separator: ":", maxSplits: 1)
-                .map { String($0).trimmingCharacters(in: .whitespaces) }
-            guard kv.count == 2 else { continue }
-            switch kv[0] {
-            case "id":       idStr      = kv[1]
-            case "tags":     tagsStr    = kv[1]
-            case "pinned":   pinnedStr  = kv[1]
-            case "created":  createdStr = kv[1]
-            case "modified": modStr     = kv[1]
-            case "cluster":  clusterStr = kv[1]
-            case "parent":   parentStr  = kv[1]
-            default: break
+        if !content.hasPrefix("---\n") {
+            // Body-only .md with sidecar metadata
+            if let (id, meta) = notesMeta.first(where: { $0.value.filename == mdFilename }) {
+                noteFilenames[id] = mdFilename
+                note = Note(id: id, text: content, tags: meta.tags,
+                            timestamp: meta.created, modifiedAt: meta.modified,
+                            fileURL: url, isPinned: meta.isPinned,
+                            clusterId: meta.clusterId, parentId: meta.parentId,
+                            folderId: meta.folderId, deletedAt: meta.deletedAt)
+            } else {
+                let id = UUID()
+                noteFilenames[id] = mdFilename
+                notesMeta[id] = NoteMetadata(tags: [], isPinned: false, clusterId: nil,
+                                             parentId: nil, folderId: nil,
+                                             created: Date(), modified: Date(),
+                                             filename: mdFilename, deletedAt: nil)
+                note = Note(id: id, text: content.trimmingCharacters(in: .whitespacesAndNewlines),
+                            fileURL: url)
             }
+        } else {
+            // Legacy frontmatter — extract and migrate
+            let iso = ISO8601DateFormatter()
+            let parts = content.components(separatedBy: "\n---\n")
+            guard parts.count >= 2 else {
+                NSLog("[Jott] Skipped corrupted frontmatter in \(mdFilename).")
+                return nil
+            }
+            let frontmatter = String(parts[0].dropFirst(4))
+            let body = parts.dropFirst().joined(separator: "\n---\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var idStr: String?; var tagsStr = ""; var createdStr: String?; var modStr: String?
+            var pinnedStr = "false"; var clusterStr: String?; var parentStr: String?; var folderStr: String?
+            for line in frontmatter.components(separatedBy: "\n") {
+                let kv = line.split(separator: ":", maxSplits: 1)
+                    .map { String($0).trimmingCharacters(in: .whitespaces) }
+                guard kv.count == 2 else { continue }
+                switch kv[0] {
+                case "id":       idStr      = kv[1]
+                case "tags":     tagsStr    = kv[1]
+                case "pinned":   pinnedStr  = kv[1]
+                case "created":  createdStr = kv[1]
+                case "modified": modStr     = kv[1]
+                case "cluster":  clusterStr = kv[1]
+                case "parent":   parentStr  = kv[1]
+                case "folder":   folderStr  = kv[1]
+                default: break
+                }
+            }
+            guard let idStr, let id = UUID(uuidString: idStr) else {
+                NSLog("[Jott] Skipped note with invalid frontmatter id in \(mdFilename).")
+                return nil
+            }
+            let tags      = tagsStr.isEmpty ? [] : tagsStr.components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let created   = createdStr.flatMap { iso.date(from: $0) } ?? Date()
+            let modified  = modStr.flatMap     { iso.date(from: $0) } ?? created
+            let isPinned  = pinnedStr.lowercased() == "true"
+            let clusterId = clusterStr.flatMap { UUID(uuidString: $0) }
+            let parentId  = parentStr.flatMap  { UUID(uuidString: $0) }
+            let folderId  = folderStr.flatMap  { UUID(uuidString: $0) }
+
+            noteFilenames[id] = mdFilename
+            notesMeta[id] = NoteMetadata(tags: tags, isPinned: isPinned, clusterId: clusterId,
+                                         parentId: parentId, folderId: folderId,
+                                         created: created, modified: modified,
+                                         filename: mdFilename, deletedAt: nil)
+            note = Note(id: id, text: body, tags: tags,
+                        timestamp: created, modifiedAt: modified,
+                        fileURL: url, isPinned: isPinned,
+                        clusterId: clusterId, parentId: parentId,
+                        folderId: folderId, deletedAt: nil)
         }
 
-        guard let idStr, let id = UUID(uuidString: idStr) else {
-            let message = "Skipped note with invalid frontmatter id in \(url.lastPathComponent)."
-            NSLog("[Jott] \(message)")
-            lastErrorMessage = message
-            return nil
+        // Migrate: write .jott counterpart and delete .md
+        if let note {
+            let jottURL = url.deletingPathExtension().appendingPathExtension("jott")
+            let jottName = jottURL.lastPathComponent
+            noteFilenames[note.id] = jottName
+            notesMeta[note.id]?.filename = jottName
+            writeNoteFile(note)
+            try? FileManager.default.removeItem(at: url)
         }
-        let tags     = tagsStr.isEmpty ? [] : tagsStr.components(separatedBy: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let created  = createdStr.flatMap { iso.date(from: $0) } ?? Date()
-        let modified = modStr.flatMap     { iso.date(from: $0) } ?? created
-
-        // Register the filename for this UUID
-        noteFilenames[id] = url.lastPathComponent
-
-        let isPinned  = pinnedStr.lowercased() == "true"
-        let clusterId = clusterStr.flatMap { UUID(uuidString: $0) }
-        let parentId  = parentStr.flatMap  { UUID(uuidString: $0) }
-        return Note(id: id, text: body, tags: tags,
-                    timestamp: created, modifiedAt: modified, fileURL: url,
-                    isPinned: isPinned, clusterId: clusterId, parentId: parentId)
+        return note
     }
 
     private func loadNotes() {
         noteFilenames = [:]
+        loadNotesMeta()
         let urls: [URL]
         do {
             try ensureNotesFolderExists()
             urls = try FileManager.default.contentsOfDirectory(
                 at: notesFolder,
-                includingPropertiesForKeys: nil,
+                includingPropertiesForKeys: [.isDirectoryKey],
                 options: .skipsHiddenFiles
             )
         } catch {
             reportError(error, context: "loading notes directory")
             return
         }
-        notesCache = urls
-            .filter { $0.pathExtension == "md" }
-            .compactMap { readNoteMD(at: $0) }
+
+        var allURLs: [URL] = urls.filter { $0.pathExtension == "jott" || $0.pathExtension == "md" }
+
+        // Recursively scan subdirectories
+        func collectNoteFiles(in dir: URL) {
+            let entries = (try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles
+            )) ?? []
+            for entry in entries {
+                if (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                    collectNoteFiles(in: entry)
+                } else if entry.pathExtension == "jott" || entry.pathExtension == "md" {
+                    allURLs.append(entry)
+                }
+            }
+        }
+        for url in urls where (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            collectNoteFiles(in: url)
+        }
+
+        // Prefer .jott over .md when both exist for the same base name
+        var seen = Set<String>()
+        let prioritized = allURLs
+            .sorted { a, _ in a.pathExtension == "jott" }
+            .filter { url in
+                let base = url.deletingPathExtension().path
+                return seen.insert(base).inserted
+            }
+
+        notesCache = prioritized
+            .compactMap { readNoteFile(at: $0) }
             .sorted { $0.modifiedAt > $1.modifiedAt }
+        dedupeNotesCache()
     }
 
     private func load() {
         loadNotes()
         loadClusters()
+        loadFolders()
         if let data = try? Data(contentsOf: remindersFileURL) {
             if let container = try? JSONDecoder().decode(StorageContainer<Reminder>.self, from: data) {
                 reminders = container.items
@@ -365,7 +561,7 @@ final class NoteStore: ObservableObject {
         for note in oldNotes {
             let url = fileURL(for: note)
             if !FileManager.default.fileExists(atPath: url.path) {
-                writeNoteMD(note)
+                writeNoteFile(note)
             }
         }
         do {
@@ -378,75 +574,140 @@ final class NoteStore: ObservableObject {
 
     // MARK: - Notes API
 
-    func upsertNote(_ note: Note) {
-        writeNoteMD(note)
+    func upsertNote(_ note: Note, syncToCloud: Bool = true) {
+        writeNoteFile(note)
         if let idx = notesCache.firstIndex(where: { $0.id == note.id }) {
             notesCache[idx] = note
         } else {
             notesCache.insert(note, at: 0)
         }
+        dedupeNotesCache()
+        if syncToCloud {
+            CloudKitSyncManager.shared.push(note: note)
+        }
         objectWillChange.send()
     }
 
     func allNotes() -> [Note] {
-        notesCache.sorted { a, b in
+        activeNotes().sorted { a, b in
             if a.isPinned != b.isPinned { return a.isPinned }
             return a.modifiedAt > b.modifiedAt
         }
     }
 
+    func deletedNotes() -> [Note] {
+        notesCache
+            .filter { $0.deletedAt != nil }
+            .sorted { ($0.deletedAt ?? $0.modifiedAt) > ($1.deletedAt ?? $1.modifiedAt) }
+    }
+
+    func allNotesIncludingDeleted() -> [Note] {
+        notesCache.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    private func activeNotes() -> [Note] {
+        notesCache.filter { $0.deletedAt == nil }
+    }
+
     func refreshFromDisk() {
         load()
+        purgeExpiredDeletedNotes()
+        CloudKitSyncManager.shared.sync(store: self)
         objectWillChange.send()
+    }
+
+    private func purgeExpiredDeletedNotes() {
+        let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+        let expired = notesCache.filter { $0.deletedAt != nil && ($0.deletedAt ?? Date()) < cutoff }.map { $0.id }
+        for id in expired { permanentlyDeleteNote(id) }
     }
 
     func togglePin(_ id: UUID) {
         guard let idx = notesCache.firstIndex(where: { $0.id == id }) else { return }
         notesCache[idx].isPinned.toggle()
-        writeNoteMD(notesCache[idx])
+        notesCache[idx].modifiedAt = Date()
+        writeNoteFile(notesCache[idx])
+        CloudKitSyncManager.shared.push(note: notesCache[idx])
         objectWillChange.send()
     }
 
     func searchNotes(query: String) -> [Note] {
         let q = query.lowercased()
-        return notesCache.filter { note in
+        return activeNotes().filter { note in
             note.text.lowercased().contains(q) ||
             note.tags.contains { $0.lowercased().contains(q) }
         }.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    func deleteNote(_ id: UUID) {
-        if let filename = noteFilenames[id] {
-            let url = notesFolder.appending(component: filename)
+    func deleteNote(_ id: UUID, syncToCloud: Bool = true) {
+        guard let idx = notesCache.firstIndex(where: { $0.id == id }) else { return }
+        notesCache[idx].deletedAt = Date()
+        notesCache[idx].modifiedAt = Date()
+        notesCache[idx].isPinned = false
+        writeNoteFile(notesCache[idx])
+        if syncToCloud {
+            CloudKitSyncManager.shared.push(note: notesCache[idx])
+        }
+        objectWillChange.send()
+    }
+
+    func restoreNote(_ id: UUID, syncToCloud: Bool = true) {
+        guard let idx = notesCache.firstIndex(where: { $0.id == id }) else { return }
+        notesCache[idx].deletedAt = nil
+        notesCache[idx].modifiedAt = Date()
+        writeNoteFile(notesCache[idx])
+        if syncToCloud {
+            CloudKitSyncManager.shared.push(note: notesCache[idx])
+        }
+        objectWillChange.send()
+    }
+
+    func permanentlyDeleteNote(_ id: UUID, syncToCloud: Bool = true) {
+        let existingNote = notesCache.first { $0.id == id }
+        if let note = existingNote ?? notesCache.first(where: { $0.id == id }) {
+            let url = note.fileURL ?? fileURL(for: note)
             do {
-                try FileManager.default.removeItem(at: url)
+                if FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
+                }
             } catch {
                 reportError(error, context: "deleting note file")
             }
+        } else if let filename = noteFilenames[id] {
+            let url = notesFolder.appending(component: filename)
+            try? FileManager.default.removeItem(at: url)
         }
         noteFilenames.removeValue(forKey: id)
+        notesMeta.removeValue(forKey: id)
+        saveNotesMeta()
         notesCache.removeAll { $0.id == id }
+        if syncToCloud {
+            CloudKitSyncManager.shared.purgeNote(id: id, modifiedAt: Date())
+        }
         objectWillChange.send()
     }
 
     func deleteNoteIfEmpty(_ id: UUID) {
         if let note = notesCache.first(where: { $0.id == id }),
            note.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            deleteNote(id)
+            permanentlyDeleteNote(id)
         }
     }
 
+#if os(macOS)
     func openNoteInEditor(_ note: Note) {
         let url = note.fileURL ?? fileURL(for: note)
         if !FileManager.default.fileExists(atPath: url.path) {
-            writeNoteMD(note)
+            writeNoteFile(note)
         }
+        NSWorkspace.shared.open(notesFolder)
         NSWorkspace.shared.open(url)
     }
 
     func openNotesFolder() {
         NSWorkspace.shared.open(notesFolder)
     }
+#endif
 
     // MARK: - Attachments
 
@@ -481,7 +742,9 @@ final class NoteStore: ObservableObject {
         do {
             try data.write(to: dest, options: .atomic)
             clearError()
-            return "attachments/\(filename)"
+            let relativePath = "attachments/\(filename)"
+            CloudKitSyncManager.shared.pushAttachment(relativePath: relativePath, fileURL: dest)
+            return relativePath
         } catch {
             reportError(error, context: "saving attachment")
             return nil
@@ -525,6 +788,10 @@ final class NoteStore: ObservableObject {
 
 
     func note(for id: UUID) -> Note? {
+        notesCache.first { $0.id == id && $0.deletedAt == nil }
+    }
+
+    func noteIncludingDeleted(for id: UUID) -> Note? {
         notesCache.first { $0.id == id }
     }
 
@@ -535,9 +802,25 @@ final class NoteStore: ObservableObject {
     }
 
     func subnotes(of parentId: UUID) -> [Note] {
-        notesCache
-            .filter { $0.parentId == parentId }
-            .sorted { $0.modifiedAt < $1.modifiedAt }
+        let children = activeNotes().filter { $0.parentId == parentId }
+        // If any have been explicitly ordered, use sortIndex; else fall back to modifiedAt
+        let hasExplicitOrder = children.contains { $0.sortIndex > 0 }
+        if hasExplicitOrder {
+            return children.sorted { a, b in
+                if a.sortIndex != b.sortIndex { return a.sortIndex < b.sortIndex }
+                return a.modifiedAt < b.modifiedAt
+            }
+        }
+        return children.sorted { $0.modifiedAt < $1.modifiedAt }
+    }
+
+    func reorderSubnotes(of parentId: UUID, ids: [UUID]) {
+        for (index, id) in ids.enumerated() {
+            guard let idx = notesCache.firstIndex(where: { $0.id == id }) else { continue }
+            notesCache[idx].sortIndex = index + 1
+            writeNoteFile(notesCache[idx])
+        }
+        objectWillChange.send()
     }
 
     func subnoteCount(of parentId: UUID) -> Int {
@@ -614,6 +897,179 @@ final class NoteStore: ObservableObject {
 
     func nextClusterColor() -> String {
         Cluster.palette[clusters.count % Cluster.palette.count]
+    }
+
+    // MARK: - Folders
+
+    private func loadFolders() {
+        guard let data = try? Data(contentsOf: foldersFileURL) else { return }
+        folders = (try? JSONDecoder().decode([NoteFolder].self, from: data)) ?? []
+    }
+
+    private func persistFolders() {
+        do {
+            let data = try JSONEncoder().encode(folders)
+            try data.write(to: foldersFileURL, options: .atomic)
+        } catch {
+            reportError(error, context: "persisting folders")
+        }
+    }
+
+    func createFolder(name: String, colorTag: FolderColorTag = .lavender, parentId: UUID? = nil) -> NoteFolder {
+        let folder = NoteFolder(name: name, colorTag: colorTag, parentId: parentId)
+        folders.append(folder)
+        persistFolders()
+        CloudKitSyncManager.shared.push(folder: folder)
+        objectWillChange.send()
+        return folder
+    }
+
+    func allFolders() -> [NoteFolder] {
+        folders
+    }
+
+    func folder(for id: UUID) -> NoteFolder? {
+        folders.first { $0.id == id }
+    }
+
+    func upsertFolder(_ folder: NoteFolder, syncToCloud: Bool = true) {
+        if let idx = folders.firstIndex(where: { $0.id == folder.id }) {
+            folders[idx] = folder
+        } else {
+            folders.append(folder)
+        }
+        dedupeFolders()
+        persistFolders()
+        if syncToCloud {
+            CloudKitSyncManager.shared.push(folder: folder)
+        }
+        objectWillChange.send()
+    }
+
+    func subfolders(of parentId: UUID?) -> [NoteFolder] {
+        folders.filter { $0.parentId == parentId }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    func renameFolder(_ id: UUID, to name: String) {
+        guard let idx = folders.firstIndex(where: { $0.id == id }) else { return }
+        let oldDir = folderDir(id)
+        folders[idx].name = name
+        folders[idx].modifiedAt = Date()
+        persistFolders()
+        // Move the subfolder on disk if it already exists
+        if let old = oldDir, let new = folderDir(id), old.path != new.path,
+           FileManager.default.fileExists(atPath: old.path) {
+            try? FileManager.default.moveItem(at: old, to: new)
+        }
+        CloudKitSyncManager.shared.push(folder: folders[idx])
+        objectWillChange.send()
+    }
+
+    func saveFolder(_ folder: NoteFolder, syncToCloud: Bool = true) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        var updated = folder
+        updated.modifiedAt = Date()
+        folders[idx] = updated
+        persistFolders()
+        if syncToCloud {
+            CloudKitSyncManager.shared.push(folder: updated)
+        }
+        objectWillChange.send()
+    }
+
+    func updateFolderColor(_ id: UUID, colorTag: FolderColorTag) {
+        guard let idx = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[idx].colorTag = colorTag
+        folders[idx].modifiedAt = Date()
+        persistFolders()
+        CloudKitSyncManager.shared.push(folder: folders[idx])
+        objectWillChange.send()
+    }
+
+    func deleteFolder(_ id: UUID, syncToCloud: Bool = true) {
+        // Move all notes in this folder back to root
+        for idx in notesCache.indices where notesCache[idx].folderId == id {
+            let oldURL = notesCache[idx].fileURL ?? fileURL(for: notesCache[idx])
+            notesCache[idx].folderId = nil
+            notesCache[idx].modifiedAt = Date()
+            noteFilenames.removeValue(forKey: notesCache[idx].id)
+            let newURL = fileURL(for: notesCache[idx])
+            if FileManager.default.fileExists(atPath: oldURL.path), oldURL.path != newURL.path {
+                try? FileManager.default.moveItem(at: oldURL, to: newURL)
+                notesCache[idx].fileURL = newURL
+            }
+            writeNoteFile(notesCache[idx])
+            CloudKitSyncManager.shared.push(note: notesCache[idx])
+        }
+        // Remove the now-empty subfolder
+        if let dir = folderDir(id), FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        folders.removeAll { $0.id == id }
+        persistFolders()
+        if syncToCloud {
+            CloudKitSyncManager.shared.deleteFolder(id: id)
+        }
+        objectWillChange.send()
+    }
+
+    func moveNote(_ noteId: UUID, toFolder folderId: UUID?) {
+        guard let idx = notesCache.firstIndex(where: { $0.id == noteId }) else { return }
+        let note = notesCache[idx]
+        let oldURL = note.fileURL ?? fileURL(for: note)
+        notesCache[idx].folderId = folderId
+        notesCache[idx].modifiedAt = Date()
+        // Clear cached filename so fileURL recalculates into the new dir
+        noteFilenames.removeValue(forKey: noteId)
+        let newURL = fileURL(for: notesCache[idx])
+        // Physically move the file
+        if FileManager.default.fileExists(atPath: oldURL.path), oldURL.path != newURL.path {
+            try? FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            try? FileManager.default.moveItem(at: oldURL, to: newURL)
+            notesCache[idx].fileURL = newURL
+        }
+        writeNoteFile(notesCache[idx])
+        CloudKitSyncManager.shared.push(note: notesCache[idx])
+        objectWillChange.send()
+    }
+
+    func notes(inFolder folderId: UUID) -> [Note] {
+        activeNotes().filter { $0.folderId == folderId && $0.parentId == nil }
+            .sorted { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.modifiedAt > b.modifiedAt
+            }
+    }
+
+    private func dedupeNotesCache() {
+        var latest: [UUID: Note] = [:]
+        for note in notesCache {
+            if let current = latest[note.id] {
+                latest[note.id] = note.modifiedAt >= current.modifiedAt ? note : current
+            } else {
+                latest[note.id] = note
+            }
+        }
+        notesCache = latest.values.sorted { a, b in
+            if a.isPinned != b.isPinned { return a.isPinned }
+            return a.modifiedAt > b.modifiedAt
+        }
+        notesMeta = notesMeta.filter { latest[$0.key] != nil }
+        noteFilenames = noteFilenames.filter { latest[$0.key] != nil }
+    }
+
+    private func dedupeFolders() {
+        var latest: [UUID: NoteFolder] = [:]
+        for folder in folders {
+            if let current = latest[folder.id] {
+                latest[folder.id] = folder.modifiedAt >= current.modifiedAt ? folder : current
+            } else {
+                latest[folder.id] = folder
+            }
+        }
+        folders = latest.values.sorted { $0.createdAt < $1.createdAt }
     }
 
 

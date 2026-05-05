@@ -28,7 +28,6 @@ private struct JottGraphCanvas: View {
     var body: some View {
         GeometryReader { proxy in
             let placements = graphPlacements(in: proxy.size)
-            let pointMap = Dictionary(uniqueKeysWithValues: placements.map { ($0.note.id, $0.point) })
 
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)

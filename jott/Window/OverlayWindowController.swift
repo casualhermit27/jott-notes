@@ -7,10 +7,55 @@ class OverlayWindowController {
     let viewModel: OverlayViewModel
     private var hostingView: FirstMouseHostingView<OverlayView>?
     private var cancellables = Set<AnyCancellable>()
+    private var dismissWorkItem: DispatchWorkItem?
 
     // Notch drop panel - fixed content width, anchored at top-center.
     private let panelHeight: CGFloat = 640
     private let notchPanelWidth: CGFloat = 460
+    private let notchOpenWidthAnimation = Animation.interpolatingSpring(
+        mass: 1.05,
+        stiffness: 195,
+        damping: 25,
+        initialVelocity: 0
+    )
+    private let notchOpenHeightAnimation = Animation.interpolatingSpring(
+        mass: 1.05,
+        stiffness: 175,
+        damping: 24,
+        initialVelocity: 0
+    ).delay(0.045)
+    private let notchOpenCornerAnimation = Animation.interpolatingSpring(
+        mass: 1.06,
+        stiffness: 160,
+        damping: 24,
+        initialVelocity: 0
+    ).delay(0.075)
+    private let notchOpenContentAnimation = Animation.easeOut(duration: 0.16).delay(0.18)
+    private let notchCloseHeightAnimation = Animation.interpolatingSpring(
+        mass: 0.86,
+        stiffness: 286,
+        damping: 32,
+        initialVelocity: 0
+    )
+    private let notchCloseWidthAnimation = Animation.interpolatingSpring(
+        mass: 0.86,
+        stiffness: 318,
+        damping: 35,
+        initialVelocity: 0
+    ).delay(0.04)
+    private let notchCloseCornerAnimation = Animation.interpolatingSpring(
+        mass: 0.86,
+        stiffness: 340,
+        damping: 38,
+        initialVelocity: 0
+    ).delay(0.075)
+    private let notchCloseExitAnimation = Animation.interpolatingSpring(
+        mass: 0.82,
+        stiffness: 310,
+        damping: 36,
+        initialVelocity: 0
+    )
+    private let notchCloseContentAnimation = Animation.easeOut(duration: 0.055)
 
     var isDarkMode: Bool { viewModel.isDarkMode }
 
@@ -26,7 +71,7 @@ class OverlayWindowController {
 
         NotificationCenter.default.addObserver(
             forName: .overlayDidResignKey, object: nil, queue: .main
-        ) { [weak self] _ in self?.dismiss() }
+        ) { [weak self] _ in self?.viewModel.dismiss() }
 
         viewModel.$isVisible
             .receive(on: DispatchQueue.main)
@@ -71,35 +116,42 @@ class OverlayWindowController {
     }
 
     func show() {
+        dismissWorkItem?.cancel()
+        dismissWorkItem = nil
         applyAppearance()
         NSApp.activate(ignoringOtherApps: true)
 
-        // Ensure no leftover layer transforms from a previous animation.
         hostingView?.layer?.removeAllAnimations()
         hostingView?.layer?.transform = CATransform3DIdentity
 
-        let target = panelFrame()
-        var start = target
-        start.origin.y = target.origin.y + panelHeight  // above screen
-
-        panel.setFrame(start, display: false)
-        panel.alphaValue = 0
+        // Clip shape starts as a notch-sized bar.
+        // Width expands immediately; height follows 60 ms later.
+        viewModel.revealProgress = 0
+        viewModel.revealWidthProgress = 0
+        viewModel.revealHeightProgress = 0
+        viewModel.revealCornerProgress = 0
+        viewModel.revealContentProgress = 0
+        viewModel.revealExitProgress = 0
+        viewModel.revealSurfaceBiasProgress = 0
+        panel.setFrame(panelFrame(), display: false)
+        panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
 
-        // Animate the window frame down — window clips its own content so
-        // the spring overshoot can never expose a gap at the top.
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.54
-            // steep deceleration curve: rushes out of notch, settles softly
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.08, 1.0, 0.24, 1.0)
-            ctx.allowsImplicitAnimation = true
-            panel.animator().setFrame(target, display: true)
-        }
-
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.20
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            withAnimation(self.notchOpenWidthAnimation) {
+                self.viewModel.revealProgress = 1
+                self.viewModel.revealWidthProgress = 1
+            }
+            withAnimation(self.notchOpenHeightAnimation) {
+                self.viewModel.revealHeightProgress = 1
+            }
+            withAnimation(self.notchOpenCornerAnimation) {
+                self.viewModel.revealCornerProgress = 1
+            }
+            withAnimation(self.notchOpenContentAnimation) {
+                self.viewModel.revealContentProgress = 1
+            }
         }
 
         DispatchQueue.main.async { [weak self] in self?.focusTextView() }
@@ -117,19 +169,40 @@ class OverlayWindowController {
     }
 
     func dismiss() {
-        let current = panel.frame
-        var exit = current
-        exit.origin.y = current.origin.y + panelHeight  // slide back up into notch
+        dismissWorkItem?.cancel()
 
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.18
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.5, 0.0, 1.0, 1.0)
-            ctx.allowsImplicitAnimation = true
-            panel.animator().setFrame(exit, display: true)
-            panel.animator().alphaValue = 0
-        }) { [weak self] in
-            self?.panel.orderOut(nil)
+        withAnimation(notchCloseContentAnimation) {
+            viewModel.revealContentProgress = 0
         }
+        withAnimation(notchCloseExitAnimation) {
+            viewModel.revealProgress = 0
+            viewModel.revealExitProgress = 1
+            viewModel.revealSurfaceBiasProgress = 1
+        }
+        withAnimation(notchCloseHeightAnimation) {
+            viewModel.revealHeightProgress = 0
+        }
+        withAnimation(notchCloseWidthAnimation) {
+            viewModel.revealWidthProgress = 0
+        }
+        withAnimation(notchCloseCornerAnimation) {
+            viewModel.revealCornerProgress = 0
+        }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.viewModel.revealProgress = 0
+            self.viewModel.revealWidthProgress = 0
+            self.viewModel.revealHeightProgress = 0
+            self.viewModel.revealCornerProgress = 0
+            self.viewModel.revealContentProgress = 0
+            self.viewModel.revealExitProgress = 0
+            self.viewModel.revealSurfaceBiasProgress = 0
+            self.panel.alphaValue = 0
+            self.panel.orderOut(nil)
+        }
+        dismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.46, execute: workItem)
     }
 
     func toggle() { viewModel.toggle() }
@@ -151,6 +224,6 @@ class OverlayWindowController {
 
     func openAllNotes() {
         viewModel.show()
-        viewModel.activateCommandMode(.notes(query: ""))
+        viewModel.activateCommandMode(.search(query: ""))
     }
 }

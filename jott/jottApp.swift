@@ -263,6 +263,7 @@ extension Bundle {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: OverlayWindowController?
     var libraryWindowController: LibraryWindowController?
+    private var syncTimer: Timer?
 
     private func ensureWindowController() -> OverlayWindowController {
         if let controller = windowController {
@@ -331,5 +332,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             await CalendarManager.shared.requestAccess()
             await CalendarManager.shared.requestRemindersAccess()
         }
+
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { _ in
+            Task { @MainActor in
+                NoteStore.shared.refreshFromDisk()
+            }
+        }
+
+        NSApp.registerForRemoteNotifications()
+        CloudKitSyncManager.shared.setupSubscription()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor in
+            NoteStore.shared.refreshFromDisk()
+        }
+    }
+
+    func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+        Task { @MainActor in
+            NoteStore.shared.refreshFromDisk()
+        }
+    }
+
+    func application(_ application: NSApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NSLog("[Jott] Remote notification registration failed: \(error.localizedDescription)")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        syncTimer?.invalidate()
+        syncTimer = nil
     }
 }

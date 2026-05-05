@@ -2,7 +2,9 @@ import EventKit
 import Foundation
 import SwiftUI
 import Combine
+#if os(macOS)
 import AppKit
+#endif
 
 @MainActor
 final class CalendarManager: ObservableObject {
@@ -212,6 +214,10 @@ final class CalendarManager: ObservableObject {
 
     private func openSystemSettingsPane(_ path: String) {
         guard let url = URL(string: path) else { return }
+#if os(macOS)
         NSWorkspace.shared.open(url)
+#else
+        UIApplication.shared.open(url)
+#endif
     }
 }

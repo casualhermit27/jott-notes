@@ -2,15 +2,20 @@ import AppKit
 import Foundation
 import Combine
 
-/// Watches the system pasteboard for text changes.
-/// When the user copies text, `pendingText` is set.
-/// The overlay reads and clears it on open (opt-in: only used if user hits hotkey after copying).
+enum ClipboardPendingKind: Equatable {
+    case text
+    case image
+}
+
+/// Watches the system pasteboard for text and image changes.
+/// The overlay can offer recent content on open, but should only insert it after explicit user action.
 @MainActor
 final class ClipboardMonitor {
     static let shared = ClipboardMonitor()
 
     private(set) var pendingText: String?
-    private var pendingTextDate: Date?
+    private(set) var pendingKind: ClipboardPendingKind?
+    private var pendingDate: Date?
     private var lastObservedChangeCount: Int
     private var cancellables = Set<AnyCancellable>()
 
@@ -34,7 +39,14 @@ final class ClipboardMonitor {
                 if let text = pb.string(forType: .string),
                    !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.pendingText = text
-                    self.pendingTextDate = Date()
+                    self.pendingKind = .text
+                    self.pendingDate = Date()
+                } else if Self.containsImageContent(pb) {
+                    self.pendingText = nil
+                    self.pendingKind = .image
+                    self.pendingDate = Date()
+                } else {
+                    self.clear()
                 }
             }
             .store(in: &cancellables)
@@ -42,29 +54,72 @@ final class ClipboardMonitor {
 
     /// Returns and clears pending text only if it was copied within the last 60 seconds.
     func consume() -> String? {
-        guard let t = pendingText,
-              let date = pendingTextDate,
+        guard let t = peek() else { return nil }
+        pendingText = nil
+        pendingKind = nil
+        pendingDate = nil
+        return t
+    }
+
+    /// Returns pending text without clearing it, only if copied within the last 60 seconds.
+    func peek() -> String? {
+        guard peekKind() == .text else { return nil }
+        return pendingText
+    }
+
+    /// Returns pending content kind without clearing it, only if copied within the last 60 seconds.
+    func peekKind() -> ClipboardPendingKind? {
+        guard let kind = pendingKind,
+              let date = pendingDate,
               Date().timeIntervalSince(date) < 60 else {
-            pendingText = nil
-            pendingTextDate = nil
+            clear()
             return nil
         }
-        pendingText = nil
-        pendingTextDate = nil
-        return t
+        return kind
+    }
+
+    /// Returns and clears pending content kind only if it was copied within the last 60 seconds.
+    func consumeKind() -> ClipboardPendingKind? {
+        guard let kind = peekKind() else { return nil }
+        clear()
+        return kind
     }
 
     /// Clears without returning.
     func clear() {
         pendingText = nil
-        pendingTextDate = nil
+        pendingKind = nil
+        pendingDate = nil
+    }
+
+    private static func containsImageContent(_ pb: NSPasteboard) -> Bool {
+        if NSImage(pasteboard: pb) != nil { return true }
+
+        let imageTypes: [NSPasteboard.PasteboardType] = [
+            .png,
+            .tiff,
+            NSPasteboard.PasteboardType("public.png"),
+            NSPasteboard.PasteboardType("public.tiff"),
+            NSPasteboard.PasteboardType("com.apple.pict")
+        ]
+        if imageTypes.contains(where: { pb.data(forType: $0) != nil }) {
+            return true
+        }
+
+        let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff"]
+        if let urls = pb.readObjects(forClasses: [NSURL.self],
+                                     options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+            return urls.contains { imageExtensions.contains($0.pathExtension.lowercased()) }
+        }
+        return false
     }
 
 #if DEBUG
     /// Test-only helper to seed clipboard state without touching NSPasteboard.
     func seedPendingTextForTesting(_ text: String?, copiedAt: Date?) {
         pendingText = text
-        pendingTextDate = copiedAt
+        pendingKind = text == nil ? nil : .text
+        pendingDate = copiedAt
     }
 #endif
 }

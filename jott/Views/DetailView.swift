@@ -204,7 +204,7 @@ struct VideoEmbedCard: View {
     @State private var hovered = false
 
     var body: some View {
-        Button(action: { URL(string: url).map { NSWorkspace.shared.open($0) } }) {
+        Button(action: { if let u = URL(string: url) { NSWorkspace.shared.open(u) } }) {
             ZStack {
                 // Background / thumbnail
                 if let img = thumbnail {
@@ -290,8 +290,9 @@ struct NoteRichContentView: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let t):
-                    InlineLinkedTextBlock(text: t, isDarkMode: isDarkMode)
-                        .onTapGesture(count: 2) { onTap() }
+                    MarkdownRichView(text: t, isDarkMode: isDarkMode, onDoubleTap: onTap) { paragraphText in
+                        InlineLinkedTextBlock(text: paragraphText, isDarkMode: isDarkMode)
+                    }
 
                 case .image(let path, let alt):
                     AttachmentImageView(path: path, alt: alt)
@@ -307,6 +308,154 @@ struct NoteRichContentView: View {
                 }
             }
         }
+    }
+}
+
+struct NoteBlockRichContentView: View {
+    let blocks: [Block]
+    let isDarkMode: Bool
+    let onTap: () -> Void
+
+    private var displayBlocks: [Block] { jottDisplayBlocks(from: blocks) }
+    private var ink: Color { isDarkMode ? Color(white: 0.92) : Color("jott-input-text") }
+    private var inkMute: Color { isDarkMode ? Color(white: 0.60) : Color(white: 0.42) }
+    private var accent: Color { isDarkMode ? Color(red: 0.58, green: 0.50, blue: 0.92) : Color(red: 0.42, green: 0.30, blue: 0.76) }
+    private var quoteBorder: Color { accent.opacity(0.45) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(displayBlocks) { block in
+                blockView(block)
+                    .onTapGesture(count: 2) { onTap() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: Block) -> some View {
+        switch block.type {
+        case .paragraph:
+            BlockSpansText(spans: block.spans, font: .system(size: 15), color: ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .heading:
+            let level = max(1, min(block.level, 3))
+            let size: CGFloat = level == 1 ? 19 : level == 2 ? 16 : 14
+            let weight: Font.Weight = level == 1 ? .bold : .semibold
+            BlockSpansText(spans: block.spans, font: .system(size: size, weight: weight), color: ink)
+                .padding(.top, level == 1 ? 6 : 2)
+                .padding(.bottom, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .bulletItem:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("·")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(accent)
+                    .frame(width: 12, alignment: .center)
+                BlockSpansText(spans: block.spans, font: .system(size: 15), color: ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        case .numberedItem:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("1.")
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundColor(inkMute)
+                    .frame(width: 22, alignment: .trailing)
+                BlockSpansText(spans: block.spans, font: .system(size: 15), color: ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        case .taskItem:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: block.checked ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(block.checked ? accent : inkMute)
+                    .frame(width: 16, alignment: .center)
+                BlockSpansText(spans: block.spans, font: .system(size: 15), color: ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        case .quote:
+            HStack(alignment: .top, spacing: 10) {
+                Rectangle()
+                    .fill(quoteBorder)
+                    .frame(width: 2.5)
+                    .clipShape(Capsule())
+                BlockSpansText(spans: block.spans, font: .system(size: 15).italic(), color: inkMute)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 2)
+
+        case .codeBlock:
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(block.code)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(isDarkMode
+                        ? Color(red: 0.75, green: 0.95, blue: 0.80)
+                        : Color(red: 0.10, green: 0.40, blue: 0.20))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .background(isDarkMode ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isDarkMode ? Color.white.opacity(0.10) : Color.black.opacity(0.08), lineWidth: 1))
+
+        case .table:
+            MDTableView(headers: block.tableHeaders, rows: block.tableRows, isDarkMode: isDarkMode)
+
+        case .divider:
+            Divider()
+                .opacity(isDarkMode ? 0.20 : 0.15)
+                .padding(.vertical, 4)
+
+        case .image:
+            if let imageURL = block.imageURL, !imageURL.isEmpty {
+                AttachmentImageView(path: imageURL, alt: block.imageAlt)
+            }
+        }
+    }
+}
+
+struct BlockSpansText: View {
+    let spans: [TextSpan]
+    let font: Font
+    let color: Color
+
+    var body: some View {
+        text
+            .font(font)
+            .foregroundColor(color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var text: Text {
+        let values = spans.isEmpty ? [TextSpan("")] : spans
+        return values.reduce(Text("")) { partial, span in
+            Text("\(partial)\(styledText(for: span))")
+        }
+    }
+
+    private func styledText(for span: TextSpan) -> Text {
+        if span.highlight {
+            var attrStr = AttributedString(span.text)
+            attrStr.backgroundColor = Color.yellow.opacity(0.40)
+            if span.bold { attrStr.font = .system(size: 15, weight: .bold) }
+            if span.italic { attrStr.font = Font.system(size: 15).italic() }
+            if span.underline { attrStr.underlineStyle = .single }
+            if span.strikethrough { attrStr.strikethroughStyle = .single }
+            if span.code { attrStr.font = .system(size: 14, design: .monospaced) }
+            return Text(attrStr)
+        }
+        var value = Text(span.text)
+        if span.bold { value = value.bold() }
+        if span.italic { value = value.italic() }
+        if span.underline { value = value.underline() }
+        if span.strikethrough { value = value.strikethrough() }
+        if span.code { value = value.font(.system(size: 14, design: .monospaced)) }
+        return value
     }
 }
 
@@ -439,42 +588,21 @@ private struct InlineLinkedTextBlock: View {
                         .frame(height: 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
+                    let hasImages = pieces.contains { if case .image = $0 { return true }; return false }
                     VStack(alignment: .leading, spacing: 8) {
-                        FlowLayout(spacing: 0, verticalAlignment: .center) {
-                            ForEach(pieces) { piece in
-                                switch piece {
-                                case .text(_, let value):
-                                    let trimmedValue = value.trimmingCharacters(in: .whitespaces)
-                                    if (trimmedValue.hasPrefix("http://") || trimmedValue.hasPrefix("https://")),
-                                       let url = URL(string: trimmedValue) {
-                                        Button(action: { NSWorkspace.shared.open(url) }) {
-                                            Text(value)
-                                                .font(.system(size: 15))
-                                                .foregroundColor(.accentColor)
-                                                .underline(color: .accentColor.opacity(0.5))
-                                        }
-                                        .buttonStyle(.plain)
-                                    } else {
-                                        Text(value)
-                                            .font(.system(size: 15))
-                                            .foregroundColor(isDarkMode ? .white : Color("jott-input-text"))
-                                    }
-
-                                case .image(_, let path, let alt):
-                                    InlineAttachmentImageToken(
-                                        path: path,
-                                        alt: alt,
-                                        isExpanded: expandedImagePath == path,
-                                        onTap: {
-                                            withAnimation(.spring(response: 0.18, dampingFraction: 0.82)) {
-                                                expandedImagePath = expandedImagePath == path ? nil : path
-                                            }
-                                        }
-                                    )
+                        if hasImages {
+                            FlowLayout(spacing: 0, verticalAlignment: .center) {
+                                ForEach(pieces) { piece in
+                                    piecView(piece)
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(pieces) { piece in
+                                piecView(piece)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         // Expanded image preview — below the paragraph, no text reflow
                         ForEach(pieces) { piece in
@@ -490,6 +618,44 @@ private struct InlineLinkedTextBlock: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func piecView(_ piece: Piece) -> some View {
+        switch piece {
+        case .text(_, let value):
+            let trimmedValue = value.trimmingCharacters(in: .whitespaces)
+            if (trimmedValue.hasPrefix("http://") || trimmedValue.hasPrefix("https://")),
+               let url = URL(string: trimmedValue) {
+                Button(action: { NSWorkspace.shared.open(url) }) {
+                    Text(value)
+                        .font(.system(size: 15))
+                        .foregroundColor(.accentColor)
+                        .underline(color: .accentColor.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+            } else {
+                let baseColor: Color = isDarkMode ? Color(white: 0.92) : Color("jott-input-text")
+                let codeBG: Color = isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+                Text(mdInlineAttributedString(value,
+                                              baseFont: .system(size: 15),
+                                              baseColor: baseColor,
+                                              codeBackground: codeBG))
+                    .font(.system(size: 15))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .image(_, let path, let alt):
+            InlineAttachmentImageToken(
+                path: path,
+                alt: alt,
+                isExpanded: expandedImagePath == path,
+                onTap: {
+                    withAnimation(.spring(response: 0.18, dampingFraction: 0.82)) {
+                        expandedImagePath = expandedImagePath == path ? nil : path
+                    }
+                }
+            )
         }
     }
 
@@ -539,17 +705,7 @@ private struct InlineLinkedTextBlock: View {
 
     private func textPieces(from chunk: String) -> [Piece] {
         guard !chunk.isEmpty else { return [] }
-        guard let regex = try? NSRegularExpression(pattern: #"\S+\s*"#) else {
-            return [.text(UUID(), chunk)]
-        }
-
-        let nsChunk = chunk as NSString
-        let matches = regex.matches(in: chunk, range: NSRange(location: 0, length: nsChunk.length))
-        if matches.isEmpty { return [.text(UUID(), chunk)] }
-
-        return matches.map { match in
-            .text(UUID(), nsChunk.substring(with: match.range))
-        }
+        return [.text(UUID(), chunk)]
     }
 }
 
@@ -596,15 +752,6 @@ struct DetailView: View {
                 DetailHeader(viewModel: viewModel, showSubnoteInput: $showSubnoteInput)
 
                 Divider().opacity(0.1)
-
-                if viewModel.isEditingNote {
-                    NoteEditToolbarStrip(viewModel: viewModel, showFormat: $showFormat)
-                        .transition(.asymmetric(
-                            insertion: .offset(y: -3).combined(with: .opacity).animation(JottMotion.content),
-                            removal: .opacity.animation(JottMotion.content)
-                        ))
-                    Divider().opacity(0.06)
-                }
 
                 ScrollView(showsIndicators: false) {
                     Group {
@@ -682,7 +829,7 @@ struct DetailView: View {
                 showSubnoteInput = false
             }
         }
-        .onChange(of: viewModel.editingNoteText) { _, _ in
+        .onChange(of: viewModel.editingNoteBlocks) { _, _ in
             scheduleAutoSave()
         }
         .onDisappear {
@@ -758,20 +905,25 @@ private struct NoteEditFormatBar: View {
     var body: some View {
         HStack(spacing: 2) {
             fmtGroup {
-                fmtBtn("B", isBold: true)     { text = "**\(text)**" }
-                fmtBtn("I", isItalic: true)   { text = "*\(text)*" }
-                fmtBtn("S", isStrike: true)   { text = "~~\(text)~~" }
+                fmtBtn("B", isBold: true) { apply(.bold) }
+                fmtBtn("I", isItalic: true) { apply(.italic) }
+                fmtBtn("U", isUnderline: true) { apply(.underline) }
+                fmtBtn("S", isStrike: true) { apply(.strikethrough) }
+                fmtIcon("highlighter") { apply(.highlight) }
             }
             fmtSep
             fmtGroup {
-                fmtIcon("list.bullet")        { text = "• " + text }
-                fmtIcon("list.number")        { text = "1. " + text }
-                fmtIcon("text.quote")         { text = "> " + text }
+                fmtIcon("list.bullet") { apply(.bulletList) }
+                fmtIcon("list.number") { apply(.numberedList) }
+                fmtIcon("checklist") { apply(.taskList) }
+                fmtIcon("text.quote") { apply(.quote) }
             }
             fmtSep
             fmtGroup {
-                fmtIcon("textformat.size")    { text = "# " + text }
-                fmtIcon("link")               { text += "\n[text](url)" }
+                fmtIcon("chevron.left.forwardslash.chevron.right") { apply(.inlineCode) }
+                fmtIcon("textformat.size") { apply(.heading) }
+                fmtIcon("link") { apply(.link) }
+                tableMenu
             }
         }
         .padding(.horizontal, 8)
@@ -788,11 +940,36 @@ private struct NoteEditFormatBar: View {
         Rectangle().fill(Color.gray.opacity(0.2)).frame(width: 1, height: 12).padding(.horizontal, 3)
     }
 
-    private func fmtBtn(_ lbl: String, isBold: Bool = false, isItalic: Bool = false, isStrike: Bool = false, action: @escaping () -> Void) -> some View {
+    private func apply(_ command: JottTextFormatCommand) {
+        var draft = text
+        if !JottTextFormatting.apply(command, fallbackText: &draft) {
+            text = draft
+        }
+    }
+
+    private var tableMenu: some View {
+        Menu {
+            Button("2 x 2") { apply(.table(rows: 2, columns: 2)) }
+            Button("3 x 3") { apply(.table(rows: 3, columns: 3)) }
+            Button("4 x 4") { apply(.table(rows: 4, columns: 4)) }
+            Button("6 x 4") { apply(.table(rows: 4, columns: 6)) }
+        } label: {
+            Image(systemName: "tablecells")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func fmtBtn(_ lbl: String, isBold: Bool = false, isItalic: Bool = false, isUnderline: Bool = false, isStrike: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Group {
                 if isBold { Text(lbl).bold() }
                 else if isItalic { Text(lbl).italic() }
+                else if isUnderline { Text(lbl).underline() }
                 else if isStrike { Text(lbl).strikethrough() }
                 else { Text(lbl) }
             }
@@ -1141,7 +1318,11 @@ private struct LinkChip: View {
     }
 
     var body: some View {
-        Button(action: { URL(string: url).map { NSWorkspace.shared.open($0) } }) {
+        Button(action: {
+            if let target = URL(string: url) {
+                NSWorkspace.shared.open(target)
+            }
+        }) {
             HStack(spacing: 6) {
                 Image(systemName: "link")
                     .font(.system(size: 10, weight: .semibold))
@@ -1183,80 +1364,59 @@ struct NoteDetailContent: View {
     ]
     private static let inlineImageRegex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^)]+)\)"#)
 
-    private var titleLine: String {
-        let lines = note.text.components(separatedBy: "\n")
-        for line in lines {
-            guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            if containsImageMarkup(line) { continue }
-            let cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty { return cleaned }
-        }
-        return ""
+    private var displayBlocks: [Block] {
+        jottDisplayBlocks(from: note.blocks)
     }
 
-    private var bodyText: String {
-        let lines = note.text.components(separatedBy: "\n")
-        guard let titleIndex = lines.firstIndex(where: { line in
-            guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-            return !containsImageMarkup(line)
-        }) else {
-            return note.text
+    private var titleBlock: Block? {
+        displayBlocks.first(where: isTitleCandidate)
+    }
+
+    private var bodyBlocks: [Block] {
+        var bodyBlocks = displayBlocks
+        if let titleIndex = bodyBlocks.firstIndex(where: { isTitleCandidate($0) }) {
+            bodyBlocks.remove(at: titleIndex)
         }
-        return lines.dropFirst(titleIndex + 1).joined(separator: "\n")
-            .trimmingCharacters(in: .newlines)
+        return bodyBlocks
+    }
+
+    private func isTitleCandidate(_ block: Block) -> Bool {
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            return !block.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default:
+            return false
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if viewModel.isEditingNote {
-                // Title suggestion chip
-                if let title = titleSuggestion {
-                    AISuggestionChip(
-                        label: title,
-                        icon: "sparkles",
-                        isDark: viewModel.isDarkMode,
-                        onApply: {
-                            let lines = viewModel.editingNoteText.components(separatedBy: "\n")
-                            let rest = lines.dropFirst().joined(separator: "\n")
-                            viewModel.editingNoteText = title + (rest.isEmpty ? "" : "\n" + rest)
-                            titleSuggestion = nil
-                        },
-                        onDismiss: { titleSuggestion = nil }
-                    )
-                    .padding(.bottom, 8)
-                }
-
-                NoteInlineEditor(
-                    text: $viewModel.editingNoteText,
-                    suggestion: nil,
-                    isDark: viewModel.isDarkMode,
-                    onTextChange: { newText in scheduleAI(for: newText) },
-                    onSuggestionAccepted: {},
-                    onSuggestionDismissed: {}
-                )
+                LibraryBlockEditor(blocks: $viewModel.editingNoteBlocks, isDarkMode: viewModel.isDarkMode)
                 .frame(minHeight: 200)
             } else {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Serif title — first non-empty line
-                    if !titleLine.isEmpty {
-                        Text(titleLine)
-                            .font(.system(size: 22, weight: .regular, design: .serif))
-                            .foregroundColor(.primary.opacity(0.92))
+                    // Serif title — first non-empty text block, rendered from JSON blocks.
+                    if let titleBlock {
+                        let titleColor: Color = viewModel.isDarkMode ? Color(white: 0.92) : Color.primary.opacity(0.92)
+                        BlockSpansText(
+                            spans: titleBlock.spans,
+                            font: .system(size: 22, weight: .regular, design: .serif),
+                            color: titleColor
+                        )
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .onTapGesture(count: 2) { viewModel.startEditingNote(note) }
                     }
 
-                    // Body — remaining lines (skip if empty)
-                    if !bodyText.isEmpty {
-                        NoteRichContentView(
-                            text: bodyText,
+                    if !bodyBlocks.isEmpty {
+                        NoteBlockRichContentView(
+                            blocks: bodyBlocks,
                             isDarkMode: viewModel.isDarkMode,
                             onTap: { viewModel.startEditingNote(note) }
                         )
-                    } else if titleLine.isEmpty {
-                        // Single-line or empty — fall back to full render
-                        NoteRichContentView(
-                            text: note.text,
+                    } else if titleBlock == nil {
+                        NoteBlockRichContentView(
+                            blocks: displayBlocks,
                             isDarkMode: viewModel.isDarkMode,
                             onTap: { viewModel.startEditingNote(note) }
                         )
@@ -1354,8 +1514,8 @@ struct NoteDetailContent: View {
         guard let path = NoteStore.shared.saveFileAttachment(from: url) else { return }
         let name = url.lastPathComponent
         let mdLine = isImage
-            ? "\n![\(name)](\(path))"
-            : "\n[📎 \(name)](\(path))"
+            ? "\n![\(name)](\(path))\n"
+            : "\n[📎 \(name)](\(path))\n"
         appendText(mdLine)
     }
 
@@ -1447,6 +1607,7 @@ private struct NoteInlineEditor: NSViewRepresentable {
             }
 
             tv.textStorage?.setAttributedString(attrStr)
+            tv.textStorage?.applyMarkdownHighlighting(baseFont: font, baseColor: textColor, isDark: isDark, ghostStart: coord.ghostStart)
             let clampedLoc = min(savedSel.location, text.utf16.count)
             tv.setSelectedRange(NSRange(location: clampedLoc, length: 0))
         }
@@ -1466,6 +1627,7 @@ private struct NoteInlineEditor: NSViewRepresentable {
         func textView(_ tv: NSTextView,
                       shouldChangeTextIn range: NSRange,
                       replacementString: String?) -> Bool {
+            JottTextFormattingRegistry.activeTextView = tv
             guard let gs = ghostStart else { return true }
             let totalLen = tv.textStorage?.length ?? 0
             if totalLen > gs {
@@ -1478,9 +1640,18 @@ private struct NoteInlineEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let tv = textView else { return }
+            JottTextFormattingRegistry.activeTextView = tv
             let newText = tv.string   // ghost already stripped by shouldChangeTextIn
             parent.text = newText
             parent.onTextChange?(newText)
+            // Re-apply syntax highlighting
+            let font = tv.font ?? NSFont.systemFont(ofSize: 15)
+            let baseColor: NSColor = parent.isDark
+                ? .white.withAlphaComponent(0.90)
+                : .black.withAlphaComponent(0.85)
+            let sel = tv.selectedRange()
+            tv.textStorage?.applyMarkdownHighlighting(baseFont: font, baseColor: baseColor, isDark: parent.isDark, ghostStart: ghostStart)
+            tv.setSelectedRange(sel)
         }
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
@@ -1514,6 +1685,16 @@ private struct NoteInlineEditor: NSViewRepresentable {
                 }
                 ghostStart = nil
                 parent.onSuggestionDismissed()
+                return true
+            }
+            if sel == #selector(NSResponder.insertNewline(_:)) ||
+               sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+                if JottTextFormatting.handleContinuationNewline(in: tv) { return true }
+                tv.insertText("\n", replacementRange: tv.selectedRange())
+                return true
+            }
+            if sel == #selector(NSResponder.insertTab(_:)),
+               JottTextFormatting.handleTab(in: tv) {
                 return true
             }
             return false
@@ -1816,6 +1997,39 @@ struct FlowLayout: Layout {
 // MARK: - Text view with image drag/drop support
 
 final class DetailNoteTextView: NSTextView {
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            JottTextFormattingRegistry.activeTextView = self
+        }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned, JottTextFormattingRegistry.activeTextView === self {
+            JottTextFormattingRegistry.activeTextView = nil
+        }
+        return resigned
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.command),
+              !modifiers.contains(.shift),
+              !modifiers.contains(.option),
+              !modifiers.contains(.control) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch event.charactersIgnoringModifiers {
+        case "b": JottTextFormatting.apply(.bold, to: self); return true
+        case "i": JottTextFormatting.apply(.italic, to: self); return true
+        case "u": JottTextFormatting.apply(.underline, to: self); return true
+        case "e": JottTextFormatting.apply(.inlineCode, to: self); return true
+        default: return super.performKeyEquivalent(with: event)
+        }
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let pb = sender.draggingPasteboard
         if pb.types?.contains(.fileURL) == true || pb.types?.contains(.tiff) == true {
@@ -1832,12 +2046,11 @@ final class DetailNoteTextView: NSTextView {
     func insertTransfer(from pb: NSPasteboard) -> Bool {
         if let images = pb.readObjects(forClasses: [NSImage.self]) as? [NSImage],
            let image = images.first {
-            let tempPath = NSTemporaryDirectory() + "clipboard_\(UUID().uuidString).png"
             if let tiff = image.tiffRepresentation,
                let bitmap = NSBitmapImageRep(data: tiff),
                let pngData = bitmap.representation(using: .png, properties: [:]),
-               (try? pngData.write(to: URL(fileURLWithPath: tempPath))) != nil {
-                let mdText = "![\(UUID().uuidString)](\(tempPath))"
+               let path = NoteStore.shared.saveAttachment(data: pngData, filename: "clipboard-\(UUID().uuidString).png") {
+                let mdText = "\n![image](\(path))\n"
                 insertText(mdText, replacementRange: selectedRange())
                 return true
             }

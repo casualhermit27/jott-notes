@@ -1,5 +1,7 @@
 import SwiftUI
 import EventKit
+import AppKit
+import UniformTypeIdentifiers
 
 struct JottSettingsView: View {
     @ObservedObject private var cal = CalendarManager.shared
@@ -8,6 +10,7 @@ struct JottSettingsView: View {
     @State private var selectedListId: String = UserDefaults.standard.string(forKey: "jott_reminderListId") ?? ""
     @AppStorage("jott_overlayPosition") private var overlayPosition: String = "center"
     @AppStorage("jott_showCommandSuggestions") private var showCommandSuggestions: Bool = false
+    @AppStorage("jott_aiUserContext") private var aiUserContext: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -158,6 +161,53 @@ struct JottSettingsView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
+
+                    sectionDivider
+
+                    // MARK: - AI Context
+                    sectionHeader("AI CONTEXT", icon: "sparkles")
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Paste a short bio, topics you write about, or any personal info. Jott uses this to make inline AI suggestions more relevant to you.")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 20)
+
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $aiUserContext)
+                                .font(.system(size: 12.5))
+                                .scrollContentBackground(.hidden)
+                                .frame(height: 72)
+                                .padding(8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(Color(NSColor.textBackgroundColor).opacity(0.7))
+                                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1))
+                                )
+
+                            if aiUserContext.isEmpty {
+                                Text("e.g. Software engineer, into climbing and cooking…")
+                                    .font(.system(size: 12.5))
+                                    .foregroundColor(.secondary.opacity(0.45))
+                                    .padding(.top, 9)
+                                    .padding(.leading, 9)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+
+                        HStack {
+                            Spacer()
+                            Button("Import Text File…") {
+                                importAIContextFromFile()
+                            }
+                            .controlSize(.small)
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.bottom, 14)
 
                     sectionDivider
 
@@ -362,6 +412,25 @@ struct JottSettingsView: View {
                     .padding(.horizontal, 20)
             }
         }
+    }
+
+    private func importAIContextFromFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [
+            .plainText,
+            .utf8PlainText,
+            .text,
+            UTType(filenameExtension: "md"),
+            UTType(filenameExtension: "markdown")
+        ].compactMap { $0 }
+
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+
+        aiUserContext = text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func permissionStatusRow(

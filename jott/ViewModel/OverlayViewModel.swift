@@ -7,6 +7,23 @@ import EventKit
 enum DetectedType { case note, reminder }
 enum FilterType   { case all, notes, reminders }
 
+struct JottDraftTable: Identifiable, Equatable {
+    var id = UUID()
+    var headers: [String]
+    var rows: [[String]]
+
+    init(rows: Int, columns: Int) {
+        let columnCount = max(1, min(columns, 8))
+        let rowCount = max(1, min(rows, 12))
+        self.headers = (1...columnCount).map { "Column \($0)" }
+        self.rows = Array(repeating: Array(repeating: "", count: columnCount), count: rowCount)
+    }
+
+    var block: Block {
+        Block(type: .table, tableHeaders: headers, tableRows: rows)
+    }
+}
+
 @MainActor
 final class OverlayViewModel: ObservableObject {
 
@@ -28,6 +45,9 @@ final class OverlayViewModel: ObservableObject {
     @Published var feedbackIcon: String = "checkmark.circle.fill"
     @Published var isDarkMode: Bool = false
     @Published var filterType: FilterType = .all
+    @Published var draftTables: [JottDraftTable] = [] {
+        didSet { scheduleInputAutoSave() }
+    }
 
     // Detail navigation
     @Published var selectedNote: Note?
@@ -38,9 +58,20 @@ final class OverlayViewModel: ObservableObject {
     // Subnote navigation stack (for opening subnotes standalone)
     @Published var navigationStack: [Note] = []
 
+    // Notch morph reveal: 0 = notch size, 1 = full panel.
+    // Split by property so width can lead height like the native notch expansion.
+    @Published var revealProgress: Double = 0
+    @Published var revealWidthProgress: Double = 0
+    @Published var revealHeightProgress: Double = 0
+    @Published var revealCornerProgress: Double = 0
+    @Published var revealContentProgress: Double = 0
+    @Published var revealExitProgress: Double = 0
+    @Published var revealSurfaceBiasProgress: Double = 0
+
     // Note editing
     @Published var isEditingNote: Bool = false
     @Published var editingNoteText: String = ""
+    @Published var editingNoteBlocks: [Block] = []
     @Published var selectedCommandIndex: Int = 0
 
     // Subnote context — when set, new notes are created as subnotes of this note
@@ -75,6 +106,19 @@ final class OverlayViewModel: ObservableObject {
 
     /// Content column width - fixed for notch panel.
     var panelDisplayWidth: CGFloat { 460 }
+    var overlayExpandedHeight: CGFloat {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if commandMode != nil || inputText.hasPrefix("/") {
+            return 540
+        }
+        if trimmed.isEmpty {
+            return 132
+        }
+        if trimmed.count > 260 || trimmed.contains("\n") {
+            return 380
+        }
+        return 250
+    }
 
     // MARK: - Init
     init(store: NoteStore? = nil) {
@@ -144,7 +188,7 @@ final class OverlayViewModel: ObservableObject {
     /// Saves (or updates) the single note for this open session
     private func commitSession(showFeedback: Bool = true) {
         let raw = inputText.trimmingCharacters(in: .whitespaces)
-        guard !raw.isEmpty else { return }
+        guard !raw.isEmpty || !draftTables.isEmpty else { return }
 
         let timeFmt: DateFormatter = {
             let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
@@ -153,13 +197,30 @@ final class OverlayViewModel: ObservableObject {
         // Forced type — inputText is already the clean content (prefix was stripped on input)
         if let forced = forcedTypeOverride {
             let text = raw   // prefix already gone
-            guard !text.isEmpty else { return }
+            guard !text.isEmpty || !draftTables.isEmpty else { return }
 
             let id = sessionNoteId ?? UUID()
             sessionNoteId = id
 
             switch forced {
             case .note:
+                if !draftTables.isEmpty {
+                    let parsed = NaturalLanguageParser.parse(text)
+                    let noteText: String
+                    let tags: [String]
+                    if case .note(let t, let extractedTags) = parsed {
+                        noteText = t
+                        tags = extractedTags
+                    } else {
+                        noteText = text
+                        tags = []
+                    }
+                    store.upsertNote(noteFromDraft(id: id, text: noteText, tags: tags))
+                    if showFeedback {
+                        showStoreFeedback(success: "Note saved", icon: "note.text")
+                    }
+                    return
+                }
                 // Check for checklist first
                 if let items = NaturalLanguageParser.detectChecklist(text) {
                     let mdText = items.map { "- \($0)" }.joined(separator: "\n")
@@ -209,7 +270,22 @@ final class OverlayViewModel: ObservableObject {
             return
         }
 
-        guard !raw.hasPrefix("/") else { return }
+        guard !raw.hasPrefix("/") || !draftTables.isEmpty else { return }
+
+        if !draftTables.isEmpty {
+            let id = sessionNoteId ?? UUID()
+            sessionNoteId = id
+            let parsed = NaturalLanguageParser.parse(raw)
+            if case .note(let noteText, let tags) = parsed {
+                store.upsertNote(noteFromDraft(id: id, text: noteText, tags: tags))
+            } else {
+                store.upsertNote(noteFromDraft(id: id, text: raw, tags: []))
+            }
+            if showFeedback {
+                showStoreFeedback(success: "Note saved", icon: "note.text")
+            }
+            return
+        }
 
         // Check for checklist before NLP parse
         if let items = NaturalLanguageParser.detectChecklist(raw) {
@@ -253,7 +329,7 @@ final class OverlayViewModel: ObservableObject {
     private var shouldAutoSaveInputDraft: Bool {
         let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isVisible,
-              !raw.isEmpty,
+              (!raw.isEmpty || !draftTables.isEmpty),
               raw != "?",
               commandMode == nil,
               !inputText.hasPrefix("/"),
@@ -275,10 +351,10 @@ final class OverlayViewModel: ObservableObject {
 
     private func saveCurrentInputAsNoteDraft(showFeedback: Bool) {
         let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
+        guard !raw.isEmpty || !draftTables.isEmpty else { return }
         let id = sessionNoteId ?? UUID()
         sessionNoteId = id
-        store.upsertNote(Note(id: id, text: raw, parentId: subnoteParentId))
+        store.upsertNote(noteFromDraft(id: id, text: raw, tags: []))
         if showFeedback {
             showStoreFeedback(success: "Note saved", icon: "note.text")
         }
@@ -286,12 +362,28 @@ final class OverlayViewModel: ObservableObject {
 
     func persistCurrentNoteDraftImmediately() {
         let raw = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
+        guard !raw.isEmpty || !draftTables.isEmpty else { return }
         guard forcedTypeOverride != .reminder else { return }
         guard commandMode == nil else { return }
         guard !raw.hasPrefix("/") else { return }
         saveCurrentInputAsNoteDraft(showFeedback: false)
         objectWillChange.send()
+    }
+
+    func insertDraftTable(rows: Int, columns: Int) {
+        draftTables.append(JottDraftTable(rows: rows, columns: columns))
+        forcedTypeOverride = .note
+        detectedType = .note
+        persistCurrentNoteDraftImmediately()
+    }
+
+    private func noteFromDraft(id: UUID, text: String, tags: [String]) -> Note {
+        var blocks = MarkdownConverter.parse(text)
+        blocks.append(contentsOf: draftTables.map(\.block))
+        if blocks.isEmpty {
+            blocks = draftTables.map(\.block)
+        }
+        return Note(id: id, blocks: blocks, tags: tags, parentId: subnoteParentId)
     }
 
     func showFeedback(_ message: String, icon: String = "checkmark.circle.fill") {
@@ -338,6 +430,7 @@ final class OverlayViewModel: ObservableObject {
         autoSaveStatus = ""
 
         inputText = ""
+        draftTables = []
         pendingClipboardKind = ClipboardMonitor.shared.peekKind()
         pendingClipboardText = ClipboardMonitor.shared.peek()
         clipboardPrefilled = pendingClipboardKind != nil
@@ -345,10 +438,11 @@ final class OverlayViewModel: ObservableObject {
     }
 
     func dismiss() {
+        guard isVisible else { return }
         inputAutoSaveTask?.cancel()
         // Save before we close
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty && text != "?" && (!text.hasPrefix("/") || isForcedCreationMode) {
+        if (!text.isEmpty || !draftTables.isEmpty) && text != "?" && (!text.hasPrefix("/") || isForcedCreationMode || !draftTables.isEmpty) {
             commitSession()
             lastDismissDate = Date()
         } else {
@@ -364,6 +458,7 @@ final class OverlayViewModel: ObservableObject {
             commandMode = nil
             commandModeDateOverride = nil
             inputText = ""
+            draftTables = []
             selectedNote = nil
             selectedReminder = nil
             isEditingNote = false
@@ -421,7 +516,6 @@ final class OverlayViewModel: ObservableObject {
             // (so the list stays useful while the suggestion bar offers the switch)
             if isTypingNewCommand {
                 switch mode {
-                case .notes:     return .notes(query: "")
                 case .reminders: return .reminders(query: "")
                 case .inbox:     return .inbox
                 case .today:     return .today
@@ -429,7 +523,6 @@ final class OverlayViewModel: ObservableObject {
                 }
             }
             switch mode {
-            case .notes:     return .notes(query: inputText)
             case .reminders: return .reminders(query: inputText)
             case .search:    return .search(query: inputText)
             default:         return mode
@@ -446,9 +539,6 @@ final class OverlayViewModel: ObservableObject {
 
     func commandItems(for command: JottCommand) -> [TimelineItem] {
         switch command {
-        case .notes(let q):
-            let notes = q.isEmpty ? getAllNotes() : searchNotes(q)
-            return notes.map { .note($0) }
         case .reminders(let q):
             let all = getAllReminders()
             if q.isEmpty { return all.map { .reminder($0) } }
@@ -544,6 +634,16 @@ final class OverlayViewModel: ObservableObject {
     // MARK: - Delete
     func deleteNote(_ id: UUID) {
         store.deleteNote(id)
+        objectWillChange.send()
+    }
+
+    func restoreNote(_ id: UUID) {
+        store.restoreNote(id)
+        objectWillChange.send()
+    }
+
+    func permanentlyDeleteNote(_ id: UUID) {
+        store.permanentlyDeleteNote(id)
         objectWillChange.send()
     }
 
@@ -666,14 +766,15 @@ final class OverlayViewModel: ObservableObject {
     // MARK: - Note editing
     func startEditingNote(_ note: Note) {
         editingNoteText = note.text
+        editingNoteBlocks = jottDisplayBlocks(from: note.blocks)
         isEditingNote = true
     }
 
     func saveEditedNote(_ originalNote: Note) {
-        let text = editingNoteText.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { cancelEditingNote(); return }
+        let cleaned = cleanedNoteBlocks(editingNoteBlocks)
+        guard !cleaned.isEmpty else { cancelEditingNote(); return }
         var updated = originalNote
-        updated.text = text
+        updated.blocks = cleaned
         updated.modifiedAt = Date()
         store.upsertNote(updated)
         selectedNote = updated
@@ -682,10 +783,10 @@ final class OverlayViewModel: ObservableObject {
 
     /// Saves the current edit without exiting edit mode (autosave path).
     func autoSaveEditedNote(_ originalNote: Note) {
-        let text = editingNoteText.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
+        let cleaned = cleanedNoteBlocks(editingNoteBlocks)
+        guard !cleaned.isEmpty else { return }
         var updated = originalNote
-        updated.text = text
+        updated.blocks = cleaned
         updated.modifiedAt = Date()
         store.upsertNote(updated)
         selectedNote = updated
@@ -704,9 +805,39 @@ final class OverlayViewModel: ObservableObject {
         return updated
     }
 
+    @discardableResult
+    func updateNote(_ originalNote: Note, blocks: [Block]) -> Note? {
+        let cleaned = cleanedNoteBlocks(blocks)
+        guard !cleaned.isEmpty else { return nil }
+        var updated = originalNote
+        updated.blocks = cleaned
+        updated.modifiedAt = Date()
+        store.upsertNote(updated)
+        objectWillChange.send()
+        return updated
+    }
+
     func cancelEditingNote() {
         isEditingNote = false
         editingNoteText = ""
+        editingNoteBlocks = []
+    }
+
+    private func cleanedNoteBlocks(_ blocks: [Block]) -> [Block] {
+        blocks.filter { block in
+            switch block.type {
+            case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+                return !block.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .codeBlock:
+                return !block.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .table:
+                return !block.tableHeaders.isEmpty
+            case .image:
+                return block.imageURL != nil
+            case .divider:
+                return true
+            }
+        }
     }
 
     // MARK: - Subnotes

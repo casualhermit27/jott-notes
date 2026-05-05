@@ -16,41 +16,53 @@ final class SpeechManager: ObservableObject {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var activeSessionID: UUID?
+    private var pendingStartID: UUID?
 
     private init() {
         recognizer = SFSpeechRecognizer(locale: .current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en_US"))
     }
 
     func startRecording(onPartial: @escaping (String) -> Void, onFinal: @escaping (String) -> Void) {
+        let requestID = UUID()
+        pendingStartID = requestID
+        errorMessage = nil
+
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let hasPermissions = await self.ensurePermissions()
-            guard hasPermissions else { return }
+            if let permissionError = await self.permissionFailureMessage() {
+                guard self.pendingStartID == requestID else { return }
+                self.errorMessage = permissionError
+                self.pendingStartID = nil
+                return
+            }
+            guard self.pendingStartID == requestID else { return }
             guard let recognizer = self.recognizer else {
                 self.errorMessage = "Speech recognizer is unavailable for the current locale."
+                self.pendingStartID = nil
                 return
             }
             guard recognizer.isAvailable else {
                 self.errorMessage = "Speech recognizer is currently unavailable."
+                self.pendingStartID = nil
                 return
             }
             self.doStartRecording(onPartial: onPartial, onFinal: onFinal)
         }
     }
 
-    private func ensurePermissions() async -> Bool {
+    private func permissionFailureMessage() async -> String? {
         let speechGranted = await ensureSpeechAuthorization()
-        let micGranted = await ensureMicrophoneAuthorization()
-        isAuthorized = speechGranted && micGranted
         if !speechGranted {
-            errorMessage = "Speech recognition access is denied. Open System Settings > Privacy & Security > Speech Recognition."
-            return false
+            isAuthorized = false
+            return "Speech recognition access is denied. Open System Settings > Privacy & Security > Speech Recognition."
         }
+        let micGranted = await ensureMicrophoneAuthorization()
         if !micGranted {
-            errorMessage = "Microphone access is denied. Open System Settings > Privacy & Security > Microphone."
-            return false
+            isAuthorized = false
+            return "Microphone access is denied. Open System Settings > Privacy & Security > Microphone."
         }
-        return true
+        isAuthorized = true
+        return nil
     }
 
     private func ensureSpeechAuthorization() async -> Bool {
@@ -78,10 +90,12 @@ final class SpeechManager: ObservableObject {
     private func doStartRecording(onPartial: @escaping (String) -> Void, onFinal: @escaping (String) -> Void) {
         guard let recognizer, recognizer.isAvailable else {
             errorMessage = "Speech recognizer is currently unavailable."
+            pendingStartID = nil
             return
         }
         stopRecording()
         errorMessage = nil
+        pendingStartID = nil
         let sessionID = UUID()
         activeSessionID = sessionID
 
@@ -92,8 +106,7 @@ final class SpeechManager: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         recognitionRequest = request
         request.shouldReportPartialResults = true
-        // Keep mic on for up to 60 s without a final result
-        if #available(macOS 13, *) {
+        if #available(iOS 16, macOS 13, *) {
             request.addsPunctuation = true
         }
 
@@ -114,24 +127,33 @@ final class SpeechManager: ObservableObject {
                 let nsError = error as NSError
                 Task { @MainActor in
                     guard self.activeSessionID == sessionID else { return }
-                    // 301 is commonly returned when the session is interrupted/cancelled
-                    // or no usable speech is captured; treat it as a user-facing prompt.
                     if nsError.code == 301 {
                         self.errorMessage = "No speech captured. Speak right after tapping the mic and try again."
                     } else {
-                        self.errorMessage = "Speech recognition failed (\(nsError.code)). Try again and confirm permissions in System Settings."
+                        self.errorMessage = "Speech recognition failed (\(nsError.code)). Try again and confirm permissions in Settings."
                     }
                     self.stopRecording()
                 }
             }
         }
 
+        #if os(iOS)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            errorMessage = "Could not configure audio session (\((error as NSError).code))."
+            stopRecording()
+            return
+        }
+        #endif
+
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self, weak request] buffer, _ in
             request?.append(buffer)
-            // Compute RMS for the waveform bar heights
             guard let data = buffer.floatChannelData?[0] else { return }
             let frames = Int(buffer.frameLength)
             guard frames > 0 else { return }
@@ -154,6 +176,7 @@ final class SpeechManager: ObservableObject {
     }
 
     func stopRecording() {
+        pendingStartID = nil
         activeSessionID = nil
         audioLevel = 0
         isRecording = false
@@ -161,7 +184,6 @@ final class SpeechManager: ObservableObject {
             if engine.isRunning {
                 engine.stop()
             }
-            // removeTap is safe to call even if no tap is installed
             engine.inputNode.removeTap(onBus: 0)
         }
         audioEngine = nil
@@ -169,5 +191,13 @@ final class SpeechManager: ObservableObject {
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
+    }
+
+    func resetTransientState() {
+        stopRecording()
+        errorMessage = nil
     }
 }

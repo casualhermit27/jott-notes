@@ -9,6 +9,23 @@
 /* Begin PBXBuildFile section */
 		A1B2C3D4E5F60718293A0001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A0003 /* Sentry */; };
 		A1B2C3D4E5F60718293A0002 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A0004 /* Sparkle */; };
+		AA00D00100000000000000CC /* jott/Model/Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00100000000000000BB /* jott/Model/Note.swift */; };
+		AA00D00200000000000000CC /* jott/Model/NoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00200000000000000BB /* jott/Model/NoteStore.swift */; };
+		AA00D00300000000000000CC /* jott/Model/NoteFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00300000000000000BB /* jott/Model/NoteFolder.swift */; };
+		AA00D00400000000000000CC /* jott/Model/SearchEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00400000000000000BB /* jott/Model/SearchEngine.swift */; };
+		AA00D00500000000000000CC /* jott/Model/NoteAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00500000000000000BB /* jott/Model/NoteAIService.swift */; };
+		AA00D00600000000000000CC /* jott/Model/CloudKitSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00600000000000000BB /* jott/Model/CloudKitSyncManager.swift */; };
+		AA00D00700000000000000CC /* jott/Model/Cluster.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00700000000000000BB /* jott/Model/Cluster.swift */; };
+		AA00D00800000000000000CC /* jott/Model/NaturalLanguageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00800000000000000BB /* jott/Model/NaturalLanguageParser.swift */; };
+		AA00D00900000000000000CC /* jott/Model/CalendarManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00900000000000000BB /* jott/Model/CalendarManager.swift */; };
+		AA00D00A00000000000000CC /* jott/Model/NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00A00000000000000BB /* jott/Model/NotificationManager.swift */; };
+		AA00D00B00000000000000CC /* jott/Model/Reminder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00B00000000000000BB /* jott/Model/Reminder.swift */; };
+		AA00D00C00000000000000CC /* jott/Model/Meeting.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00C00000000000000BB /* jott/Model/Meeting.swift */; };
+		AA00D00D00000000000000CC /* jott/Views/MarkdownRenderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00D00000000000000BB /* jott/Views/MarkdownRenderEngine.swift */; };
+		AA00D00E00000000000000CC /* jott/Model/Block.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00E00000000000000BB /* jott/Model/Block.swift */; };
+		AA00D00F00000000000000CC /* jott/Model/MarkdownConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00F00000000000000BB /* jott/Model/MarkdownConverter.swift */; };
+		AA00D01000000000000000CC /* jott/Model/SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C01000000000000000BB /* jott/Model/SpeechManager.swift */; };
+		AA00E00100000000000000DD /* jott/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00E00200000000000000DD /* jott/Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -21,12 +38,48 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		BB10E00200000000000000BB /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		AA00B00100000000000000AA /* JottMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JottMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA00C00100000000000000BB /* jott/Model/Note.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/Note.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00200000000000000BB /* jott/Model/NoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/NoteStore.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00300000000000000BB /* jott/Model/NoteFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/NoteFolder.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00400000000000000BB /* jott/Model/SearchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/SearchEngine.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00500000000000000BB /* jott/Model/NoteAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/NoteAIService.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00600000000000000BB /* jott/Model/CloudKitSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/CloudKitSyncManager.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00700000000000000BB /* jott/Model/Cluster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/Cluster.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00800000000000000BB /* jott/Model/NaturalLanguageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/NaturalLanguageParser.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00900000000000000BB /* jott/Model/CalendarManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/CalendarManager.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00A00000000000000BB /* jott/Model/NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/NotificationManager.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00B00000000000000BB /* jott/Model/Reminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/Reminder.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00C00000000000000BB /* jott/Model/Meeting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/Meeting.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00D00000000000000BB /* jott/Views/MarkdownRenderEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Views/MarkdownRenderEngine.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00E00000000000000BB /* jott/Model/Block.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/Block.swift; sourceTree = SOURCE_ROOT; };
+		AA00C00F00000000000000BB /* jott/Model/MarkdownConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/MarkdownConverter.swift; sourceTree = SOURCE_ROOT; };
+		AA00C01000000000000000BB /* jott/Model/SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/SpeechManager.swift; sourceTree = SOURCE_ROOT; };
+		AA00E00200000000000000DD /* jott/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = jott/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		E50C87332F6F317400EEF1FD /* jott.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = jott.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F0A1B2C3D4E5F60718290001 /* jottTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = jottTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA00B00900000000000000AA /* jottMobile */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = jottMobile;
+			sourceTree = "<group>";
+		};
 		E50C87352F6F317400EEF1FD /* jott */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = jott;
@@ -40,6 +93,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		AA00B00400000000000000AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E50C87302F6F317400EEF1FD /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -62,9 +122,11 @@
 		E50C872A2F6F317400EEF1FD = {
 			isa = PBXGroup;
 			children = (
-				E50C87352F6F317400EEF1FD /* jott */,
+					E50C87352F6F317400EEF1FD /* jott */,
 				F0A1B2C3D4E5F60718290002 /* jottTests */,
+				AA00B00900000000000000AA /* jottMobile */,
 				E50C87342F6F317400EEF1FD /* Products */,
+				E58F2BA82FA61A6B00D81B56 /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -73,13 +135,61 @@
 			children = (
 				E50C87332F6F317400EEF1FD /* jott.app */,
 				F0A1B2C3D4E5F60718290001 /* jottTests.xctest */,
+				AA00B00100000000000000AA /* JottMobile.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		E58F2BA82FA61A6B00D81B56 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				AA00C00100000000000000BB /* jott/Model/Note.swift */,
+				AA00C00200000000000000BB /* jott/Model/NoteStore.swift */,
+				AA00C00300000000000000BB /* jott/Model/NoteFolder.swift */,
+				AA00C00E00000000000000BB /* jott/Model/Block.swift */,
+				AA00C00F00000000000000BB /* jott/Model/MarkdownConverter.swift */,
+				AA00C00400000000000000BB /* jott/Model/SearchEngine.swift */,
+				AA00C00500000000000000BB /* jott/Model/NoteAIService.swift */,
+				AA00C00600000000000000BB /* jott/Model/CloudKitSyncManager.swift */,
+				AA00C00700000000000000BB /* jott/Model/Cluster.swift */,
+				AA00C00800000000000000BB /* jott/Model/NaturalLanguageParser.swift */,
+				AA00C00900000000000000BB /* jott/Model/CalendarManager.swift */,
+				AA00C00A00000000000000BB /* jott/Model/NotificationManager.swift */,
+				AA00C00B00000000000000BB /* jott/Model/Reminder.swift */,
+				AA00C00C00000000000000BB /* jott/Model/Meeting.swift */,
+				AA00C00D00000000000000BB /* jott/Views/MarkdownRenderEngine.swift */,
+				AA00C01000000000000000BB /* jott/Model/SpeechManager.swift */,
+				AA00E00200000000000000DD /* jott/Assets.xcassets */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		AA00B00200000000000000AA /* JottMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA00B00600000000000000AA /* Build configuration list for PBXNativeTarget "JottMobile" */;
+			buildPhases = (
+				AA00B00300000000000000AA /* Sources */,
+				AA00B00400000000000000AA /* Frameworks */,
+				AA00B00500000000000000AA /* Resources */,
+				BB10E00200000000000000BB /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AA00B00900000000000000AA /* jottMobile */,
+			);
+			name = JottMobile;
+			packageProductDependencies = (
+			);
+			productName = JottMobile;
+			productReference = AA00B00100000000000000AA /* JottMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
 		E50C87322F6F317400EEF1FD /* jott */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E50C873E2F6F317500EEF1FD /* Build configuration list for PBXNativeTarget "jott" */;
@@ -137,6 +247,9 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					AA00B00200000000000000AA = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					E50C87322F6F317400EEF1FD = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -166,11 +279,20 @@
 			targets = (
 				E50C87322F6F317400EEF1FD /* jott */,
 				F0A1B2C3D4E5F60718290003 /* jottTests */,
+				AA00B00200000000000000AA /* JottMobile */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		AA00B00500000000000000AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA00E00100000000000000DD /* jott/Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E50C87312F6F317400EEF1FD /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -188,6 +310,29 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		AA00B00300000000000000AA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA00D00100000000000000CC /* jott/Model/Note.swift in Sources */,
+				AA00D00200000000000000CC /* jott/Model/NoteStore.swift in Sources */,
+				AA00D00300000000000000CC /* jott/Model/NoteFolder.swift in Sources */,
+				AA00D00400000000000000CC /* jott/Model/SearchEngine.swift in Sources */,
+				AA00D00500000000000000CC /* jott/Model/NoteAIService.swift in Sources */,
+				AA00D00600000000000000CC /* jott/Model/CloudKitSyncManager.swift in Sources */,
+				AA00D00700000000000000CC /* jott/Model/Cluster.swift in Sources */,
+				AA00D00800000000000000CC /* jott/Model/NaturalLanguageParser.swift in Sources */,
+				AA00D00900000000000000CC /* jott/Model/CalendarManager.swift in Sources */,
+				AA00D00A00000000000000CC /* jott/Model/NotificationManager.swift in Sources */,
+				AA00D00B00000000000000CC /* jott/Model/Reminder.swift in Sources */,
+				AA00D00C00000000000000CC /* jott/Model/Meeting.swift in Sources */,
+				AA00D00D00000000000000CC /* jott/Views/MarkdownRenderEngine.swift in Sources */,
+				AA00D00E00000000000000CC /* jott/Model/Block.swift in Sources */,
+				AA00D00F00000000000000CC /* jott/Model/MarkdownConverter.swift in Sources */,
+				AA00D01000000000000000CC /* jott/Model/SpeechManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E50C872F2F6F317400EEF1FD /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -213,6 +358,91 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		AA00B00700000000000000AA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = jottMobile/jottMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 847R6X96S2;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = \"com.casualhermit.jott.mobile\";\n    CFBundleURLSchemes =     (\n        jott\n    );\n}";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA00B00800000000000000AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = jottMobile/jottMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 847R6X96S2;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = \"com.casualhermit.jott.mobile\";\n    CFBundleURLSchemes =     (\n        jott\n    );\n}";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		E50C873C2F6F317500EEF1FD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -338,6 +568,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = jott/jott.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 2;
@@ -394,6 +625,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = jott/jott.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 2;
@@ -481,6 +713,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		AA00B00600000000000000AA /* Build configuration list for PBXNativeTarget "JottMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA00B00700000000000000AA /* Debug */,
+				AA00B00800000000000000AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E50C872E2F6F317400EEF1FD /* Build configuration list for PBXProject "jott" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

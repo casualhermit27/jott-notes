@@ -8,6 +8,7 @@ private enum LibraryFilter: Equatable {
     case today
     case thisWeek
     case thisMonth
+    case recentlyDeleted
 
     var label: String {
         switch self {
@@ -17,23 +18,10 @@ private enum LibraryFilter: Equatable {
         case .today:         return "Today"
         case .thisWeek:      return "This week"
         case .thisMonth:     return "This month"
+        case .recentlyDeleted: return "Recently Deleted"
         }
     }
     var isActive: Bool { self != .none }
-}
-
-private enum LibraryDisplayMode: String, CaseIterable {
-    case grid    = "Grid"
-    case list    = "List"
-    case folders = "Folders"
-
-    var icon: String {
-        switch self {
-        case .grid:    return "square.grid.2x2"
-        case .list:    return "list.bullet"
-        case .folders: return "folder"
-        }
-    }
 }
 
 private enum LibrarySelection: Equatable {
@@ -67,7 +55,6 @@ struct LibraryView: View {
     @State private var searchText: String = ""
     @State private var selectedItem: LibrarySelection?
     @State private var selectedNoteIDs: Set<UUID> = []
-    @State private var displayMode: LibraryDisplayMode = .grid
     @State private var selectionAnchorNoteID: UUID?
     @State private var isDragSelectingNotes = false
     @State private var isDetailExpanded: Bool = false
@@ -75,10 +62,9 @@ struct LibraryView: View {
     @State private var activeFilter: LibraryFilter = .none
     /// Debounced search results — updated async, never on every keystroke.
     @State private var searchResults: [SearchResult] = []
-    // Folder navigation
-    @State private var activeFolderID: UUID? = nil
-    @State private var showNewFolderSheet = false
-    @State private var newFolderName: String = ""
+    // Folder navigation stack (root folders when empty, deeper when navigated in)
+    @State private var folderStack: [UUID] = []
+    private var activeFolderID: UUID? { folderStack.last }
     @State private var renamingFolderID: UUID? = nil
     @State private var renameFolderName: String = ""
     @State private var showRenameFolderSheet = false
@@ -92,11 +78,22 @@ struct LibraryView: View {
         Array(Set(viewModel.getAllNotes().flatMap { $0.tags })).sorted()
     }
 
+    private var isRecentlyDeleted: Bool {
+        activeFilter == .recentlyDeleted
+    }
+
     private var filteredNotes: [Note] {
+        if isRecentlyDeleted {
+            return NoteStore.shared.deletedNotes().filter { $0.parentId == nil }
+        }
         if isSearching {
             return searchResults.compactMap { r in r.isSubnote ? nil : r.note }
         }
-        let base = viewModel.getAllNotes().filter { $0.parentId == nil }
+        var base = viewModel.getAllNotes().filter { $0.parentId == nil }
+        // Folder drill-down filter
+        if let fid = activeFolderID {
+            base = base.filter { $0.folderId == fid }
+        }
         switch activeFilter {
         case .none:          return base
         case .pinned:        return base.filter { $0.isPinned }
@@ -110,6 +107,8 @@ struct LibraryView: View {
         case .thisMonth:
             let start = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
             return base.filter { $0.modifiedAt >= start }
+        case .recentlyDeleted:
+            return base
         }
     }
 
@@ -128,12 +127,14 @@ struct LibraryView: View {
 
     private var selectedNote: Note? {
         guard case .note(let id) = selectedItem else { return nil }
-        return NoteStore.shared.allNotes().first(where: { $0.id == id })
+        return isRecentlyDeleted
+            ? NoteStore.shared.deletedNotes().first(where: { $0.id == id })
+            : NoteStore.shared.allNotes().first(where: { $0.id == id })
     }
 
     private var selectionSyncSignature: String {
         let noteSignature = filteredNotes.map { $0.id.uuidString }.joined(separator: ",")
-        return [searchText, displayMode.rawValue, noteSignature]
+        return [searchText, activeFolderID?.uuidString ?? "", noteSignature]
             .joined(separator: "|")
     }
 
@@ -146,66 +147,89 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 LibraryTopBar(
                     searchText: $searchText,
-                    displayMode: $displayMode,
                     activeFilter: $activeFilter,
                     visibleCount: filteredItemCount,
                     selectedCount: selectedNoteIDs.count,
                     isDarkMode: isDarkMode,
                     selectedNote: selectedNote,
                     availableTags: availableTags,
+                    destructiveActionLabel: isRecentlyDeleted ? "Delete Forever" : "Delete",
                     onDismissDetail: { clearSelection() },
-                    onDeleteSelected: { showDeleteConfirm = true }
+                    onDeleteSelected: { showDeleteConfirm = true },
+                    onNewNote: {
+                        let newNote = Note(blocks: [Block(type: .paragraph, spans: [TextSpan("")])],
+                                          folderId: activeFolderID)
+                        NoteStore.shared.upsertNote(newNote)
+                        viewModel.selectedNote = NoteStore.shared.note(for: newNote.id) ?? newNote
+                        viewModel.startEditingNote(viewModel.selectedNote ?? newNote)
+                        withAnimation(JottMotion.content) {
+                            selectedItem = .note(newNote.id)
+                            selectedNoteIDs = [newNote.id]
+                            selectionAnchorNoteID = newNote.id
+                        }
+                    }
                 )
 
-                Divider()
-                    .opacity(isDarkMode ? 0.16 : 0.10)
+                Divider().opacity(isDarkMode ? 0.16 : 0.10)
+
+                // Folder strip — always visible unless searching or viewing trash
+                if !isSearching && !isRecentlyDeleted {
+                    FolderStrip(
+                        noteStore: noteStore,
+                        folderStack: folderStack,
+                        isDark: isDarkMode,
+                        onPop: {
+                            withAnimation(JottMotion.content) {
+                                folderStack = Array(folderStack.dropLast())
+                            }
+                        },
+                        onPush: { id in
+                            withAnimation(JottMotion.content) { folderStack.append(id) }
+                        },
+                        onAddFolder: nil,
+                        onRenameFolder: { folder in
+                            renameFolderName = folder.name
+                            renamingFolderID = folder.id
+                            showRenameFolderSheet = true
+                        }
+                    )
+                    Divider().opacity(isDarkMode ? 0.10 : 0.07)
+                }
 
                 ZStack(alignment: .trailing) {
-                    // Primary pane always stays full-width (no layout jump)
                     primaryPane
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay(
-                            Color.black.opacity(selectedNote != nil && !isDetailExpanded && displayMode != .grid ? 0.18 : 0)
-                                .ignoresSafeArea()
-                                .allowsHitTesting(false)
-                                .animation(.easeInOut(duration: 0.22), value: selectedNote?.id)
-                        )
-                        .onTapGesture {
-                            if selectedNote != nil && !isDetailExpanded && displayMode != .grid { clearSelection() }
-                        }
+                        .opacity(isDetailExpanded ? 0 : 1)
 
-                    // Detail panel — all modes
                     if let note = selectedNote {
-                        HStack(spacing: 0) {
-                            Divider().opacity(isDarkMode ? 0.14 : 0.09)
-
-                            LibraryNoteDetailPanel(
-                                note: note,
-                                viewModel: viewModel,
-                                isDark: isDarkMode,
-                                isExpanded: $isDetailExpanded,
-                                onClose: {
-                                    isDetailExpanded = false
-                                    clearSelection()
-                                }
-                            )
-                            .id(note.id)
-                            .transition(.opacity)
-                            .frame(maxWidth: isDetailExpanded ? .infinity : 360, maxHeight: .infinity)
-                        }
-                        .frame(maxWidth: isDetailExpanded ? .infinity : 361)
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .trailing).combined(with: .opacity)
-                            )
+                        LibraryNoteDetailPanel(
+                            note: note,
+                            viewModel: viewModel,
+                            isDark: isDarkMode,
+                            isExpanded: $isDetailExpanded,
+                            onClose: {
+                                isDetailExpanded = false
+                                clearSelection()
+                            }
                         )
+                        .id(note.id)
+                        .transition(.opacity)
+                        .frame(maxWidth: isDetailExpanded ? .infinity : 360, maxHeight: .infinity)
+                        .animation(.easeInOut(duration: 0.16), value: note.id)
+                        .background(isDarkMode
+                            ? Color(red: 0.082, green: 0.082, blue: 0.090)
+                            : Color(red: 0.984, green: 0.984, blue: 0.990)
+                        )
+                        .frame(maxWidth: isDetailExpanded ? .infinity : 361)
+                        .overlay(alignment: .leading) {
+                            Divider()
+                                .opacity(isDetailExpanded ? 0 : (isDarkMode ? 0.14 : 0.09))
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                         .zIndex(1)
                     }
-
                 }
-                .animation(.easeInOut(duration: 0.20), value: selectedNote?.id)
-                .animation(.spring(response: 0.32, dampingFraction: 0.88), value: isDetailExpanded)
+                .animation(.spring(response: 0.40, dampingFraction: 0.84), value: isDetailExpanded)
             }
             .background(JottDS(isDark: isDarkMode).canvas)
             .colorScheme(isDarkMode ? .dark : .light)
@@ -213,9 +237,12 @@ struct LibraryView: View {
             .task(id: selectionSyncSignature) {
                 syncSelection()
             }
-            .onChange(of: viewModel.selectedNote?.id) { _, newID in
-                if let newID {
-                    withAnimation(JottMotion.content) { selectedItem = .note(newID) }
+            .onChange(of: viewModel.isVisible) { _, visible in
+                if visible { searchText = "" }
+            }
+            .onChange(of: viewModel.navigationStack) { _, stack in
+                if let top = stack.last {
+                    withAnimation(JottMotion.content) { selectedItem = .note(top.id) }
                 }
             }
             // Debounced search — 180ms wait, then run off main thread
@@ -249,6 +276,7 @@ struct LibraryView: View {
                 if showDeleteConfirm {
                     DeleteConfirmOverlay(
                         count: selectedNoteIDs.count,
+                        isPermanent: isRecentlyDeleted,
                         isDark: isDarkMode,
                         onDelete: { deleteSelectedNotes() },
                         onCancel: { showDeleteConfirm = false }
@@ -257,46 +285,52 @@ struct LibraryView: View {
                 }
             }
             .animation(.spring(response: 0.28, dampingFraction: 0.72), value: showDeleteConfirm)
-            .onChange(of: displayMode) { _, newMode in
-                if newMode != .folders { activeFolderID = nil }
+            .sheet(isPresented: $showRenameFolderSheet) {
+                RenameFolderSheet(
+                    folderName: $renameFolderName,
+                    isDark: isDarkMode,
+                    onRename: { name in
+                        if let id = renamingFolderID {
+                            NoteStore.shared.renameFolder(id, to: name)
+                        }
+                        showRenameFolderSheet = false
+                        renamingFolderID = nil
+                    },
+                    onCancel: {
+                        showRenameFolderSheet = false
+                        renamingFolderID = nil
+                    }
+                )
             }
         )
     }
 
-    private var primaryPane: AnyView {
-        AnyView(Group {
+    private var primaryPane: some View {
+        Group {
             if isSearching {
-                // Unified search results (all modes, includes subnotes)
                 SearchResultsView(
                     results: searchResults,
                     query: searchText,
                     isDark: isDarkMode,
                     selectedNote: selectedNote,
-                    onSelect: { note in select(note: note) }
+                    matchedFolders: noteStore.folders.filter {
+                        $0.name.localizedCaseInsensitiveContains(searchText)
+                    },
+                    onSelect: { note in select(note: note) },
+                    onSelectFolder: { id in
+                        searchText = ""
+                        withAnimation(JottMotion.content) { folderStack = [id] }
+                    }
                 )
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
             } else {
-                switch displayMode {
-                case .grid:
-                    libraryGridView
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                case .list:
-                    libraryListView
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                case .folders:
-                    libraryFoldersView
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                }
+                libraryGridView
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.9), value: displayMode)
         .animation(.easeInOut(duration: 0.18), value: isSearching)
-        .background(Color.clear)
-        )
     }
 
     private var libraryGridView: some View {
@@ -313,10 +347,16 @@ struct LibraryView: View {
             ScrollView(showsIndicators: false) {
                 if notes.isEmpty {
                     LibraryEmptyState(
-                        title: searchText.isEmpty ? "No notes yet" : "No notes match this search",
-                        message: searchText.isEmpty ? "Capture something and it will land here." : "Try a broader query or switch views."
+                        title: isRecentlyDeleted
+                            ? "Recently Deleted is empty"
+                            : (activeFolderID != nil ? "Nothing in this folder" : "No notes yet"),
+                        message: isRecentlyDeleted
+                            ? "Deleted notes stay here until you delete them forever."
+                            : (activeFolderID != nil
+                            ? "Right-click any note and choose Move to Folder."
+                            : "Capture something and it will land here.")
                     )
-                    .padding(.top, 56)
+                    .frame(height: max(proxy.size.height - 32, 200))
                 } else {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
                         ForEach(notes, id: \.id) { note in
@@ -343,211 +383,24 @@ struct LibraryView: View {
         }
     }
 
-    private var libraryListView: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 8) {
-                if sortedVisibleNotes.isEmpty {
-                    LibraryEmptyState(
-                        title: searchText.isEmpty ? "Nothing here yet" : "No matches found",
-                        message: searchText.isEmpty ? "Capture something and it will land here." : "Try a broader query or clear the search."
-                    )
-                } else {
-                    ForEach(sortedVisibleNotes, id: \.id) { note in
-                        TimelineItemView(
-                            item: .note(note),
-                            viewModel: viewModel,
-                            isSelected: selectedNoteIDs.contains(note.id),
-                            onSelect: { modifiers in
-                                select(note: note, modifiers: modifiers)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Folders View
-
-    private var libraryFoldersView: some View {
-        let ds = JottDS(isDark: isDarkMode)
-
-        return Group {
-            if let folderID = activeFolderID {
-                // ── Notes inside a folder ──
-                VStack(spacing: 0) {
-                    // Back header
-                    HStack(spacing: 8) {
-                        Button {
-                            withAnimation(JottMotion.content) { activeFolderID = nil }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 11, weight: .semibold))
-                                if let folder = noteStore.folders.first(where: { $0.id == folderID }) {
-                                    Image(systemName: "folder.fill")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(folder.displayColor)
-                                    Text(folder.name)
-                                        .font(.system(size: 13, weight: .semibold))
-                                }
-                            }
-                            .foregroundColor(ds.inkMute)
-                        }
-                        .buttonStyle(.plain)
-                        Spacer()
-                        let count = NoteStore.shared.notes(inFolder: folderID).count
-                        Text("\(count) note\(count == 1 ? "" : "s")")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(ds.inkFaintest)
-                    }
-                    .padding(.bottom, 14)
-
-                    libraryFolderNotesGrid(folderID: folderID)
-                }
-            } else {
-                // ── Folder cards grid ──
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 20) {
-                        // New folder button + section header
-                        HStack {
-                            Text("FOLDERS")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundColor(ds.inkFaintest)
-                                .tracking(1.2)
-                            Spacer()
-                            Button {
-                                newFolderName = ""
-                                showNewFolderSheet = true
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .semibold))
-                                    Text("New Folder")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundColor(ds.accent)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(ds.accentSoft)
-                                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if noteStore.folders.isEmpty {
-                            LibraryEmptyState(
-                                title: "No folders yet",
-                                message: "Create a folder to organise your notes."
-                            )
-                            .padding(.top, 24)
-                        } else {
-                            folderCardsGrid
-                        }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showNewFolderSheet) {
-            NewFolderSheet(
-                folderName: $newFolderName,
-                isDark: isDarkMode,
-                onCreate: { name, color in
-                    _ = NoteStore.shared.createFolder(name: name, colorTag: color)
-                    showNewFolderSheet = false
-                },
-                onCancel: { showNewFolderSheet = false }
-            )
-        }
-        .sheet(isPresented: $showRenameFolderSheet) {
-            RenameFolderSheet(
-                folderName: $renameFolderName,
-                isDark: isDarkMode,
-                onRename: { name in
-                    if let id = renamingFolderID {
-                        NoteStore.shared.renameFolder(id, to: name)
-                    }
-                    showRenameFolderSheet = false
-                    renamingFolderID = nil
-                },
-                onCancel: {
-                    showRenameFolderSheet = false
-                    renamingFolderID = nil
-                }
-            )
-        }
-    }
-
-    private var folderCardsGrid: some View {
-        let columns = [GridItem(.adaptive(minimum: 148, maximum: 220), spacing: 14)]
-
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-            ForEach(noteStore.folders) { folder in
-                FolderCard(
-                    folder: folder,
-                    noteCount: NoteStore.shared.notes(inFolder: folder.id).count,
-                    isDark: isDarkMode
-                )
-                .onTapGesture {
-                    withAnimation(JottMotion.content) { activeFolderID = folder.id }
-                }
-                .contextMenu {
-                    Button("Rename") {
-                        renameFolderName = folder.name
-                        renamingFolderID = folder.id
-                        showRenameFolderSheet = true
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        NoteStore.shared.deleteFolder(folder.id)
-                    } label: {
-                        Label("Delete Folder", systemImage: "trash")
-                    }
-                }
-            }
-        }
-    }
-
-    private func libraryFolderNotesGrid(folderID: UUID) -> some View {
-        let notes = NoteStore.shared.notes(inFolder: folderID)
-
-        return GeometryReader { proxy in
-            let spacing: CGFloat = 16
-            let targetWidth: CGFloat = 260
-            let usable = max(proxy.size.width, targetWidth)
-            let cols = max(1, Int((usable + spacing) / (targetWidth + spacing)))
-            let columns = Array(repeating: GridItem(.flexible(), spacing: spacing, alignment: .top), count: cols)
-
-            if notes.isEmpty {
-                FolderEmptyState()
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-            } else {
-                ScrollView(showsIndicators: false) {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
-                        ForEach(notes, id: \.id) { note in
-                            LibraryMinimalNoteCard(
-                                note: note,
-                                estimatedHeight: gridCardEstimatedHeight(for: note),
-                                isSelected: selectedNoteIDs.contains(note.id),
-                                isDarkMode: isDarkMode,
-                                subnoteCount: viewModel.subnoteCount(of: note.id),
-                                animationNamespace: gridCardNamespace,
-                                isDragSelecting: $isDragSelectingNotes,
-                                onActivate: { modifiers in select(note: note, modifiers: modifiers) },
-                                onDragSelect: { dragSelect(note: note) },
-                                viewModel: viewModel
-                            )
-                            .contextMenu { noteContextMenu(for: note) }
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     @ViewBuilder
     private func noteContextMenu(for note: Note) -> some View {
+        if isRecentlyDeleted {
+            Button {
+                NoteStore.shared.restoreNote(note.id)
+            } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                selectedNoteIDs = [note.id]
+                showDeleteConfirm = true
+            } label: {
+                Label("Delete Forever", systemImage: "trash.slash")
+            }
+        } else {
         Button("Edit Note") {
             select(note: note)
         }
@@ -592,6 +445,7 @@ struct LibraryView: View {
             showDeleteConfirm = true
         } label: {
             Label("Delete", systemImage: "trash")
+        }
         }
     }
 
@@ -656,6 +510,7 @@ struct LibraryView: View {
         }
 
         viewModel.navigationStack.removeAll()
+        viewModel.selectedNote = note
         withAnimation(JottMotion.content) {
             selectedItem = .note(note.id)
             selectedNoteIDs = [note.id]
@@ -694,6 +549,7 @@ struct LibraryView: View {
             else { viewModel.cancelEditingNote() }
         }
         viewModel.navigationStack.removeAll()
+        viewModel.selectedNote = nil
         withAnimation(JottMotion.content) {
             selectedItem = nil
             selectedNoteIDs.removeAll()
@@ -704,13 +560,20 @@ struct LibraryView: View {
 
     private func deleteSelectedNotes() {
         let ids = selectedNoteIDs
+        let permanently = isRecentlyDeleted
         withAnimation(JottMotion.content) {
             showDeleteConfirm = false
             selectedItem = nil
             selectedNoteIDs.removeAll()
             selectionAnchorNoteID = nil
         }
-        for id in ids { viewModel.deleteNote(id) }
+        for id in ids {
+            if permanently {
+                viewModel.permanentlyDeleteNote(id)
+            } else {
+                viewModel.deleteNote(id)
+            }
+        }
     }
 
     private func syncSelection() {
@@ -759,25 +622,33 @@ private struct LibraryMinimalNoteCard: View {
     @State private var thumbnail: NSImage?
     @State private var showSubnotes: Bool = false
 
+    private var displayBlocks: [Block] {
+        jottDisplayBlocks(from: note.blocks)
+    }
+
     private var subnotePreviews: [String] {
         NoteStore.shared.subnotes(of: note.id)
             .prefix(3)
             .compactMap { sub in
-                sub.text.components(separatedBy: "\n")
-                    .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+                sub.blocks.lazy
+                    .compactMap(textTitle(for:))
+                    .first
             }
     }
 
     private var title: String {
-        let lines = note.text.components(separatedBy: "\n")
-        return lines.first { !isImageOnlyLine($0) && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled"
+        if let textTitle = displayBlocks.lazy.compactMap(textTitle(for:)).first {
+            return textTitle
+        }
+        if let table = displayBlocks.first(where: { $0.type == .table }) {
+            let columns = max(table.tableHeaders.count, table.tableRows.first?.count ?? 0)
+            return columns > 0 ? "Table · \(columns) column\(columns == 1 ? "" : "s")" : "Table"
+        }
+        return "Untitled"
     }
 
     private var previewLines: [String] {
-        let cleaned = note.text
-            .components(separatedBy: "\n")
-            .map { stripMarkup(from: $0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let cleaned = displayBlocks.flatMap { previewLines(for: $0) }
 
         guard !cleaned.isEmpty else { return [] }
         return Array(cleaned.dropFirst().prefix(thumbnail == nil ? 3 : 2))
@@ -801,11 +672,48 @@ private struct LibraryMinimalNoteCard: View {
     }
 
     private var firstImagePath: String? {
+        if let imageBlock = displayBlocks.first(where: { $0.type == .image }),
+           let imageURL = imageBlock.imageURL,
+           !imageURL.isEmpty {
+            return imageURL
+        }
         guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^)]+)\)"#) else { return nil }
         let source = note.text
         guard let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
               let pathRange = Range(match.range(at: 1), in: source) else { return nil }
         return String(source[pathRange])
+    }
+
+    private func textTitle(for block: Block) -> String? {
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            let value = stripMarkup(from: block.plainText).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !isTableMarkdownLine(value) else { return nil }
+            return value.isEmpty ? nil : value
+        default:
+            return nil
+        }
+    }
+
+    private func previewLines(for block: Block) -> [String] {
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            let value = stripMarkup(from: block.plainText).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !isTableMarkdownLine(value) else { return [] }
+            return value.isEmpty ? [] : [value]
+        case .table:
+            let columns = max(block.tableHeaders.count, block.tableRows.first?.count ?? 0)
+            let rows = block.tableRows.count
+            guard columns > 0 else { return ["Table"] }
+            return ["\(columns) column\(columns == 1 ? "" : "s") · \(rows) row\(rows == 1 ? "" : "s")"]
+        default:
+            return []
+        }
+    }
+
+    private func isTableMarkdownLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("|") && trimmed.hasSuffix("|")
     }
 
     @ViewBuilder
@@ -1010,7 +918,16 @@ private struct LibraryMinimalNoteCard: View {
         raw
             .replacingOccurrences(of: #"\[\[([^\]]+)\]\]"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"!\[[^\]]*\]\(([^)]+)\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^#{1,6} "#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*\*(.+?)\*\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\*(.+?)\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"~~(.+?)~~"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"^[-*+] "#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^> "#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
     }
 
     private func isImageOnlyLine(_ line: String) -> Bool {
@@ -1071,6 +988,7 @@ private struct LibraryNoteDetailPanel: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(squishColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     } else {
@@ -1082,6 +1000,26 @@ private struct LibraryNoteDetailPanel: View {
                     }
 
                     Spacer()
+
+                    // Edit / Done toggle
+                    Button {
+                        if viewModel.isEditingNote {
+                            viewModel.saveEditedNote(note)
+                        } else {
+                            viewModel.startEditingNote(note)
+                        }
+                    } label: {
+                        Text(viewModel.isEditingNote ? "Done" : "Edit")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(viewModel.isEditingNote ? squishColor : ds.inkFaint)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(viewModel.isEditingNote ? squishColor.opacity(0.14) : (isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)))
+                            )
+                    }
+                    .buttonStyle(.plain)
 
                     // Open in editor
                     Button {
@@ -1167,9 +1105,10 @@ private struct LibraryNoteDetailPanel: View {
             .buttonStyle(SquishButtonStyle())
             .padding(.trailing, 18)
             .padding(.bottom, 18)
-            .opacity(showingSubnoteInput ? 0 : 1)
-            .scaleEffect(showingSubnoteInput ? 0.88 : 1)
+            .opacity((showingSubnoteInput || viewModel.isEditingNote) ? 0 : 1)
+            .scaleEffect((showingSubnoteInput || viewModel.isEditingNote) ? 0.88 : 1)
             .animation(JottMotion.micro, value: showingSubnoteInput)
+            .animation(JottMotion.micro, value: viewModel.isEditingNote)
         }
         .background(
             isDark
@@ -1478,6 +1417,7 @@ private struct LibraryInPlaceDetailCard: View {
 
 private struct DeleteConfirmOverlay: View {
     let count: Int
+    let isPermanent: Bool
     let isDark: Bool
     let onDelete: () -> Void
     let onCancel: () -> Void
@@ -1505,14 +1445,21 @@ private struct DeleteConfirmOverlay: View {
                 }
                 .padding(.bottom, 14)
 
-                Text("Delete \(count) \(count == 1 ? "note" : "notes")?")
+                Text(isPermanent
+                    ? "Delete forever?"
+                    : "Delete \(count) \(count == 1 ? "note" : "notes")?"
+                )
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(isDark ? .white.opacity(0.92) : .black.opacity(0.86))
                     .padding(.bottom, 6)
 
-                Text("This can't be undone.")
+                Text(isPermanent
+                    ? "This can't be undone."
+                    : "Moved notes stay in Recently Deleted until you delete them forever."
+                )
                     .font(.system(size: 12, weight: .regular))
                     .foregroundColor(.secondary.opacity(0.55))
+                    .multilineTextAlignment(.center)
                     .padding(.bottom, 22)
 
                 HStack(spacing: 10) {
@@ -1534,7 +1481,7 @@ private struct DeleteConfirmOverlay: View {
 
                     // Delete
                     Button(action: onDelete) {
-                        Text("Delete")
+                        Text(isPermanent ? "Delete Forever" : "Delete")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
@@ -1596,135 +1543,40 @@ private struct FolderCard: View {
 
     private var ds: JottDS { JottDS(isDark: isDark) }
 
+    // Creamy pastel tint derived from the folder color
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            FolderIconView(color: folder.displayColor, size: 72)
-                .scaleEffect(hovered ? 1.04 : 1.0)
-                .animation(.spring(response: 0.28, dampingFraction: 0.62), value: hovered)
+        HStack(spacing: 12) {
+            FolderIconView(color: folder.displayColor, size: 36)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(folder.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundColor(ds.ink)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                    .lineLimit(1)
 
                 Text("\(noteCount) note\(noteCount == 1 ? "" : "s")")
-                    .font(.system(size: 11, design: .rounded))
+                    .font(.system(size: 11))
                     .foregroundColor(ds.inkFaint)
             }
+
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isDark ? Color.white.opacity(hovered ? 0.07 : 0.04) : Color.black.opacity(hovered ? 0.04 : 0.02))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(hovered
+                    ? folder.displayColor.opacity(isDark ? 0.12 : 0.09)
+                    : (isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(
-                            hovered ? folder.displayColor.opacity(0.35) : ds.hairline,
-                            lineWidth: 1
-                        )
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(ds.hairline, lineWidth: 1)
                 )
         )
-        .onHover { h in withAnimation(.easeInOut(duration: 0.14)) { hovered = h } }
-    }
-}
-
-// MARK: - New Folder Sheet
-
-private struct NewFolderSheet: View {
-    @Binding var folderName: String
-    let isDark: Bool
-    let onCreate: (String, FolderColorTag) -> Void
-    let onCancel: () -> Void
-
-    @State private var selectedColor: FolderColorTag = .lavender
-    @FocusState private var nameFieldFocused: Bool
-
-    private var ds: JottDS { JottDS(isDark: isDark) }
-
-    // 2 rows × 5 columns
-    private let tagRows: [[FolderColorTag]] = {
-        let all = FolderColorTag.allCases
-        return stride(from: 0, to: all.count, by: 5).map {
-            Array(all[$0..<min($0 + 5, all.count)])
-        }
-    }()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // ── Live preview ──
-            HStack(spacing: 14) {
-                FolderIconView(color: selectedColor.color, size: 56)
-                    .animation(.spring(response: 0.26, dampingFraction: 0.70), value: selectedColor)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("New Folder")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(ds.ink)
-                    Text(folderName.isEmpty ? "Untitled" : folderName)
-                        .font(.system(size: 12))
-                        .foregroundColor(ds.inkFaint)
-                        .lineLimit(1)
-                }
-            }
-
-            // ── Name field ──
-            TextField("Folder name", text: $folderName)
-                .textFieldStyle(.roundedBorder)
-                .focused($nameFieldFocused)
-                .onSubmit { commitIfValid() }
-
-            // ── Colour picker ──
-            VStack(alignment: .leading, spacing: 9) {
-                Text("COLOUR")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundColor(ds.inkFaintest)
-                    .tracking(1.2)
-
-                ForEach(tagRows.indices, id: \.self) { rowIdx in
-                    HStack(spacing: 9) {
-                        ForEach(tagRows[rowIdx], id: \.self) { tag in
-                            ZStack(alignment: .bottom) {
-                                FolderIconView(color: tag.color, size: 44)
-                                // Selection ring
-                                if selectedColor == tag {
-                                    Capsule()
-                                        .fill(tag.color)
-                                        .frame(width: 18, height: 4)
-                                        .offset(y: 6)
-                                }
-                            }
-                            .padding(.bottom, 6)
-                            .contentShape(Rectangle())
-                            .onTapGesture { selectedColor = tag }
-                        }
-                    }
-                }
-            }
-
-            // ── Actions ──
-            HStack(spacing: 10) {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.escape)
-                Button("Create") { commitIfValid() }
-                    .keyboardShortcut(.return)
-                    .disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(24)
-        .frame(width: 350)
-        .background(ds.canvas)
-        .colorScheme(isDark ? .dark : .light)
-        .onAppear { nameFieldFocused = true }
-    }
-
-    private func commitIfValid() {
-        let trimmed = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        onCreate(trimmed, selectedColor)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onHover { h in withAnimation(.easeInOut(duration: 0.12)) { hovered = h } }
     }
 }
 
@@ -1923,14 +1775,13 @@ struct TimelineItemView: View {
                     .padding(.bottom, 6)
                 }
             }
-            .contentShape(Rectangle())
-
             // Hairline divider
             Rectangle()
                 .fill(ds.hairline)
                 .frame(height: 1)
                 .padding(.horizontal, 12)
         }
+        .contentShape(Rectangle())
         .contextMenu {
             if case .note(let note) = item {
                 Button("Delete", role: .destructive) {
@@ -1964,17 +1815,29 @@ struct TimelineItemView: View {
     }
 
     private func noteTitle(for note: Note) -> String {
-        note.text.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty }) ?? "Untitled"
+        note.blocks.lazy.compactMap(displayLine(for:)).first ?? "Untitled"
     }
 
     private func notePreview(for note: Note) -> String? {
-        let lines = note.text.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let lines = note.blocks.compactMap(displayLine(for:))
         guard lines.count > 1 else { return nil }
         return lines[1]
+    }
+
+    private func displayLine(for block: Block) -> String? {
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            let value = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        case .table:
+            let columns = max(block.tableHeaders.count, block.tableRows.first?.count ?? 0)
+            guard columns > 0 else { return "Table" }
+            return "Table · \(columns) column\(columns == 1 ? "" : "s")"
+        case .image:
+            return block.imageAlt.isEmpty ? nil : block.imageAlt
+        default:
+            return nil
+        }
     }
 }
 
@@ -1985,35 +1848,97 @@ private struct SearchResultsView: View {
     let query: String
     let isDark: Bool
     let selectedNote: Note?
+    var matchedFolders: [NoteFolder] = []
     let onSelect: (Note) -> Void
+    var onSelectFolder: ((UUID) -> Void)? = nil
+
+    private var ds: JottDS { JottDS(isDark: isDark) }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            if results.isEmpty {
-                LibraryEmptyState(
-                    title: "No results",
-                    message: "Nothing matched \"\(query)\". Try a different phrasing or add more context."
-                )
-                .padding(.top, 56)
-            } else {
-                LazyVStack(alignment: .leading, spacing: 5) {
-                    ForEach(results) { result in
-                        SearchResultRow(
-                            result: result,
-                            isDark: isDark,
-                            isSelected: {
-                                switch result {
-                                case .rootNote(let n, _): return selectedNote?.id == n.id
-                                case .subnote(_, let p, _): return selectedNote?.id == p.id
-                                }
-                            }(),
-                            onSelect: {
-                                switch result {
-                                case .rootNote(let n, _): onSelect(n)
-                                case .subnote(_, let p, _): onSelect(p)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                // Folder matches
+                if !matchedFolders.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("FOLDERS")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundColor(ds.inkFaintest)
+                            .tracking(0.8)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(matchedFolders) { folder in
+                                    Button {
+                                        onSelectFolder?(folder.id)
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "folder.fill")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(folder.displayColor)
+                                            Text(folder.name)
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(ds.ink)
+                                            let count = NoteStore.shared.notes(inFolder: folder.id).count
+                                            if count > 0 {
+                                                Text("\(count)")
+                                                    .font(.system(size: 10, design: .monospaced))
+                                                    .foregroundColor(ds.inkFaintest)
+                                            }
+                                            Image(systemName: "arrow.right")
+                                                .font(.system(size: 9, weight: .medium))
+                                                .foregroundColor(ds.inkFaintest)
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(folder.displayColor.opacity(isDark ? 0.10 : 0.07))
+                                        .clipShape(Capsule(style: .continuous))
+                                        .overlay(Capsule(style: .continuous)
+                                            .strokeBorder(folder.displayColor.opacity(0.25), lineWidth: 1))
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
-                        )
+                        }
+                    }
+                    .padding(.bottom, 16)
+
+                    if !results.isEmpty {
+                        Divider().opacity(isDark ? 0.10 : 0.08).padding(.bottom, 12)
+
+                        Text("NOTES")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundColor(ds.inkFaintest)
+                            .tracking(0.8)
+                            .padding(.bottom, 8)
+                    }
+                }
+
+                if results.isEmpty && matchedFolders.isEmpty {
+                    SearchResultsEmptyState(
+                        title: "No results",
+                        query: query
+                    )
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 5) {
+                        ForEach(results) { result in
+                            SearchResultRow(
+                                result: result,
+                                query: query,
+                                isDark: isDark,
+                                isSelected: {
+                                    switch result {
+                                    case .rootNote(let n, _): return selectedNote?.id == n.id
+                                    case .subnote(_, let p, _): return selectedNote?.id == p.id
+                                    }
+                                }(),
+                                onSelect: {
+                                    switch result {
+                                    case .rootNote(let n, _): onSelect(n)
+                                    case .subnote(_, let p, _): onSelect(p)
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -2023,6 +1948,7 @@ private struct SearchResultsView: View {
 
 private struct SearchResultRow: View {
     let result: SearchResult
+    var query: String = ""
     let isDark: Bool
     let isSelected: Bool
     let onSelect: () -> Void
@@ -2039,17 +1965,21 @@ private struct SearchResultRow: View {
     private var isSubnote: Bool { result.isSubnote }
 
     private var title: String {
-        note.text.components(separatedBy: "\n")
+        cleanedNoteLines
             .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
             ?? "Untitled"
     }
 
     private var bodyPreview: String? {
-        let lines = note.text.components(separatedBy: "\n")
+        let lines = cleanedNoteLines
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         guard lines.count > 1 else { return nil }
         return lines.dropFirst().prefix(2).joined(separator: "  ·  ")
+    }
+
+    private var cleanedNoteLines: [String] {
+        note.blocks.compactMap(displayLine(for:))
     }
 
     private var dateLabel: String {
@@ -2117,6 +2047,10 @@ private struct SearchResultRow: View {
 
     @ViewBuilder
     private var rowContent: some View {
+        let highlightColor = isDark
+            ? Color(red: 0.58, green: 0.50, blue: 0.92)
+            : Color(red: 0.50, green: 0.40, blue: 0.88)
+
         VStack(alignment: .leading, spacing: 2) {
             if isSubnote, let parent = result.parentNote {
                 Text(parentTitle(parent))
@@ -2124,36 +2058,312 @@ private struct SearchResultRow: View {
                     .foregroundColor(.secondary.opacity(0.40))
                     .lineLimit(1)
             }
-            Text(title)
-                .font(.system(size: 13, weight: isSubnote ? .regular : .medium))
-                .foregroundColor(isDark ? .white.opacity(0.88) : .black.opacity(0.84))
-                .lineLimit(1)
+            HighlightedText(
+                text: title,
+                query: query,
+                font: .system(size: 13, weight: isSubnote ? .regular : .medium),
+                baseColor: isDark ? .white.opacity(0.88) : .black.opacity(0.84),
+                highlightColor: highlightColor
+            )
+            .lineLimit(1)
             if !isSubnote, let preview = bodyPreview {
-                Text(preview)
-                    .font(.system(size: 11.5))
-                    .foregroundColor(.secondary.opacity(0.50))
-                    .lineLimit(1)
+                HighlightedText(
+                    text: preview,
+                    query: query,
+                    font: .system(size: 11.5),
+                    baseColor: .secondary.opacity(0.50),
+                    highlightColor: highlightColor.opacity(0.80)
+                )
+                .lineLimit(1)
             }
         }
     }
 
     private func parentTitle(_ parent: Note) -> String {
-        parent.text.components(separatedBy: "\n")
-            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? "Untitled"
+        parent.blocks.compactMap(displayLine(for:)).first ?? "Untitled"
+    }
+
+    private func displayLine(for block: Block) -> String? {
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            let value = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        case .table:
+            let columns = max(block.tableHeaders.count, block.tableRows.first?.count ?? 0)
+            guard columns > 0 else { return "Table" }
+            return "Table · \(columns) column\(columns == 1 ? "" : "s")"
+        case .image:
+            return block.imageAlt.isEmpty ? nil : block.imageAlt
+        default:
+            return nil
+        }
     }
 }
 
+// MARK: - Folder Strip
+
+private struct FolderStrip: View {
+    @ObservedObject var noteStore: NoteStore
+    let folderStack: [UUID]
+    let isDark: Bool
+    let onPop: () -> Void
+    let onPush: (UUID) -> Void
+    var onAddFolder: (() -> Void)? = nil
+    var onRenameFolder: ((NoteFolder) -> Void)? = nil
+
+    @State private var isCreating = false
+    @State private var newName = ""
+    @State private var newColor: FolderColorTag = .lavender
+    @State private var showColorPicker = false
+    @FocusState private var fieldFocused: Bool
+
+    private var ds: JottDS { JottDS(isDark: isDark) }
+
+    private var visibleFolders: [NoteFolder] {
+        if let current = folderStack.last {
+            return noteStore.subfolders(of: current)
+        }
+        return noteStore.folders.filter { $0.parentId == nil }
+    }
+
+    private var breadcrumb: [NoteFolder] {
+        folderStack.compactMap { id in noteStore.folders.first(where: { $0.id == id }) }
+    }
+
+    private func commitNew() {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { cancelNew(); return }
+        _ = NoteStore.shared.createFolder(name: trimmed, colorTag: newColor, parentId: folderStack.last)
+        cancelNew()
+    }
+
+    private func cancelNew() {
+        showColorPicker = false
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+            isCreating = false
+            newName = ""
+            newColor = .lavender
+        }
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                // Back + path when inside a folder
+                if !folderStack.isEmpty {
+                    Button(action: onPop) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 10, weight: .semibold))
+                            if let folder = breadcrumb.last {
+                                Text(folder.name)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .foregroundColor(ds.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(ds.accentSoft)
+                        .clipShape(Capsule(style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    if breadcrumb.count > 1 {
+                        ForEach(Array(breadcrumb.dropLast().enumerated()), id: \.element.id) { i, f in
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(ds.inkFaintest)
+                            Button {
+                                onPop()
+                            } label: {
+                                Text(f.name)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(ds.inkFaint)
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if !visibleFolders.isEmpty {
+                        Rectangle()
+                            .fill(ds.hairlineMid)
+                            .frame(width: 1, height: 16)
+                    }
+                }
+
+                // Folder chips
+                ForEach(visibleFolders) { folder in
+                    FolderChip(folder: folder, isDark: isDark) {
+                        onPush(folder.id)
+                    }
+                    .contextMenu {
+                        Button("Rename") { onRenameFolder?(folder) }
+                        Divider()
+                        Button(role: .destructive) {
+                            NoteStore.shared.deleteFolder(folder.id)
+                        } label: { Label("Delete", systemImage: "trash") }
+                    }
+                }
+
+                // Inline creation field (replaces + button while active)
+                if isCreating {
+                    HStack(spacing: 8) {
+                        // Folder icon — tap opens color popover
+                        Button {
+                            showColorPicker.toggle()
+                        } label: {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(newColor.color)
+                                .animation(.easeInOut(duration: 0.15), value: newColor)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showColorPicker, arrowEdge: .bottom) {
+                            HStack(spacing: 6) {
+                                ForEach(FolderColorTag.allCases, id: \.self) { tag in
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.12)) { newColor = tag }
+                                        showColorPicker = false
+                                    } label: {
+                                        ZStack {
+                                            Image(systemName: "folder.fill")
+                                                .font(.system(size: 18))
+                                                .foregroundColor(tag.color)
+                                            if newColor == tag {
+                                                Image(systemName: "checkmark")
+                                                    .font(.system(size: 7, weight: .bold))
+                                                    .foregroundColor(.white)
+                                            }
+                                        }
+                                        .frame(width: 32, height: 32)
+                                        .background(newColor == tag ? tag.color.opacity(0.15) : Color.clear)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(10)
+                        }
+
+                        TextField("Folder name", text: $newName)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(ds.ink)
+                            .focused($fieldFocused)
+                            .frame(minWidth: 90, maxWidth: 150)
+                            .onSubmit { commitNew() }
+
+                        // Confirm
+                        Button(action: commitNew) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(newName.trimmingCharacters(in: .whitespaces).isEmpty ? ds.inkFaintest : ds.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                        // Cancel
+                        Button(action: cancelNew) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(ds.inkFaint)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.escape, modifiers: [])
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(ds.surfaceAlt)
+                    .clipShape(Capsule(style: .continuous))
+                    .overlay(Capsule(style: .continuous).strokeBorder(ds.accentRing, lineWidth: 1))
+                    .transition(.scale(scale: 0.88, anchor: .leading).combined(with: .opacity))
+                } else {
+                    // + button
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                            isCreating = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { fieldFocused = true }
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(ds.accent)
+                            .frame(width: 28, height: 28)
+                            .background(ds.accentSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .help("New folder")
+                    .transition(.scale(scale: 0.88, anchor: .leading).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 9)
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isCreating)
+        .animation(JottMotion.content, value: folderStack.map(\.uuidString).joined())
+    }
+}
+
+private struct FolderChip: View {
+    let folder: NoteFolder
+    let isDark: Bool
+    let onTap: () -> Void
+
+    @State private var hovered = false
+    private var ds: JottDS { JottDS(isDark: isDark) }
+    private var noteCount: Int { NoteStore.shared.notes(inFolder: folder.id).count }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(folder.displayColor)
+                Text(folder.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(hovered ? ds.ink : ds.inkMute)
+                    .lineLimit(1)
+                if noteCount > 0 {
+                    Text("\(noteCount)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(ds.inkFaintest)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                hovered
+                    ? folder.displayColor.opacity(isDark ? 0.12 : 0.07)
+                    : (isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(hovered ? folder.displayColor.opacity(0.35) : ds.hairline, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeInOut(duration: 0.12)) { hovered = h } }
+    }
+}
+
+// MARK: - Top Bar
+
 private struct LibraryTopBar: View {
     @Binding var searchText: String
-    @Binding var displayMode: LibraryDisplayMode
     @Binding var activeFilter: LibraryFilter
     let visibleCount: Int
     var selectedCount: Int = 0
     let isDarkMode: Bool
     let selectedNote: Note?
     var availableTags: [String] = []
+    var destructiveActionLabel: String = "Delete"
     var onDismissDetail: (() -> Void)? = nil
     var onDeleteSelected: (() -> Void)? = nil
+    var onNewNote: (() -> Void)? = nil
 
     @State private var showFilterPopover = false
     private var isSearching: Bool { !searchText.isEmpty }
@@ -2162,33 +2372,16 @@ private struct LibraryTopBar: View {
     var body: some View {
         let ds = JottDS(isDark: isDarkMode)
 
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             // Title + inline mono count
-            HStack(spacing: 6) {
+            HStack(spacing: 7) {
                 Text("Notes")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(ds.ink)
                 Text("\(visibleCount)")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(ds.inkFaintest)
                     .tracking(0.3)
-            }
-
-            // View mode toggle — hidden when multi-selecting or searching
-            if !isSearching && !hasSelection {
-                HStack(spacing: 2) {
-                    ForEach(LibraryDisplayMode.allCases, id: \.self) { mode in
-                        modeButton(mode, ds: ds)
-                    }
-                }
-                .padding(3)
-                .background(ds.surfaceAlt)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(ds.hairline, lineWidth: 1)
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .leading)))
             }
 
             // Multi-select action bar
@@ -2204,7 +2397,7 @@ private struct LibraryTopBar: View {
                         HStack(spacing: 5) {
                             Image(systemName: "trash")
                                 .font(.system(size: 10.5, weight: .medium))
-                            Text("Delete")
+                            Text(destructiveActionLabel)
                                 .font(.system(size: 12, weight: .medium))
                         }
                         .foregroundColor(.white)
@@ -2221,6 +2414,40 @@ private struct LibraryTopBar: View {
             }
 
             Spacer(minLength: 0)
+
+            if !isSearching {
+                Button {
+                    onNewNote?()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(ds.accent)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(ds.accentSoft)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("New Note")
+            }
+
+            if !isSearching {
+                Button {
+                    activeFilter = activeFilter == .recentlyDeleted ? .none : .recentlyDeleted
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(activeFilter == .recentlyDeleted ? ds.accent : ds.inkFaint)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(activeFilter == .recentlyDeleted ? ds.accentSoft : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Recently Deleted")
+            }
 
             // Filter button
             if !isSearching {
@@ -2289,40 +2516,14 @@ private struct LibraryTopBar: View {
                     .animation(.easeInOut(duration: 0.18), value: isSearching)
             )
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 11)
-        .frame(height: 56)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .frame(height: 68)
         .background(isDarkMode ? Color.white.opacity(0.006) : Color.white.opacity(0.80))
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isSearching)
         .animation(.spring(response: 0.26, dampingFraction: 0.82), value: hasSelection)
     }
 
-    private func modeButton(_ mode: LibraryDisplayMode, ds: JottDS) -> some View {
-        let isActive = displayMode == mode
-        return Button {
-            withAnimation(JottMotion.content) { displayMode = mode }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: mode.icon)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .symbolEffect(.bounce, options: .nonRepeating, value: isActive)
-                Text(mode.rawValue)
-                    .font(.system(size: 11.5, weight: .medium))
-            }
-            .foregroundColor(isActive ? ds.ink : ds.inkFaint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? ds.surface : Color.clear)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(isActive ? ds.hairlineMid : Color.clear, lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 // MARK: - Filter Popover
@@ -2349,6 +2550,9 @@ private struct LibraryFilterPopover: View {
             filterRow(.today,     icon: "sun.max",         label: "Today")
             filterRow(.thisWeek,  icon: "calendar.badge.clock", label: "This week")
             filterRow(.thisMonth, icon: "calendar",        label: "This month")
+
+            Divider().opacity(0.12).padding(.vertical, 6)
+            filterRow(.recentlyDeleted, icon: "trash", label: "Recently Deleted")
 
             if !availableTags.isEmpty {
                 Divider().opacity(0.12).padding(.vertical, 6)
@@ -2470,75 +2674,53 @@ private struct LibraryEmptyState: View {
     @State private var appeared = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Icon cluster
-            ZStack {
-                // Background glow
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.12),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: 48
-                        )
-                    )
-                    .frame(width: 96, height: 96)
-
-                // Stacked cards illustration
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.10))
-                    .frame(width: 40, height: 32)
-                    .rotationEffect(.degrees(-10))
-                    .offset(x: -8, y: 4)
-
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.16))
-                    .frame(width: 40, height: 32)
-                    .rotationEffect(.degrees(5))
-                    .offset(x: 6, y: 2)
-
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.28))
-                    .frame(width: 40, height: 32)
-                    .overlay(
-                        Image(systemName: "pencil.line")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.70))
-                    )
+        ZStack(alignment: .bottomTrailing) {
+            Color.clear
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundColor(.primary.opacity(0.22))
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary.opacity(0.18))
+                    .multilineTextAlignment(.trailing)
             }
-            .scaleEffect(appeared ? 1.0 : 0.82)
-            .opacity(appeared ? 1.0 : 0)
-
-            Spacer().frame(height: 20)
-
-            Text(title)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundColor(.primary.opacity(0.72))
-                .opacity(appeared ? 1 : 0)
-                .offset(y: appeared ? 0 : 6)
-
-            Spacer().frame(height: 6)
-
-            Text(message)
-                .font(.system(size: 12.5))
-                .foregroundColor(.secondary.opacity(0.68))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 260)
-                .opacity(appeared ? 1 : 0)
-                .offset(y: appeared ? 0 : 4)
+            .padding(.bottom, 24)
+            .padding(.trailing, 2)
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 5)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.72).delay(0.05)) {
-                appeared = true
-            }
+            withAnimation(.easeOut(duration: 0.35).delay(0.08)) { appeared = true }
         }
         .onDisappear { appeared = false }
+    }
+}
+
+private struct SearchResultsEmptyState: View {
+    let title: String
+    let query: String
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Text(title)
+                .font(JottTypography.title(40, weight: .semibold))
+                .foregroundColor(.primary.opacity(0.92))
+
+            Text("Nothing matched \"\(query)\"")
+                .font(JottTypography.noteBody(20, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.72))
+                .multilineTextAlignment(.center)
+
+            Text("Try a broader term or a more exact phrase.")
+                .font(JottTypography.ui(16, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.56))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 520, maxHeight: .infinity, alignment: .center)
+        .padding(.horizontal, 32)
     }
 }
 
@@ -2567,15 +2749,26 @@ struct LibraryNoteInspector: View {
     let onSelectNote: (Note) -> Void
     @State private var isEditing = false
     @State private var editingText = ""
+    @State private var editingBlocks: [Block] = []
     @FocusState private var isEditorFocused: Bool
 
     private var isDarkMode: Bool {
         viewModel.isDarkMode
     }
 
+    private var displayBlocks: [Block] {
+        jottDisplayBlocks(from: note.blocks)
+    }
+
     private var title: String {
-        let lines = note.text.components(separatedBy: "\n")
-        return lines.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? "Untitled"
+        if let textTitle = displayBlocks.lazy.compactMap(textTitle(for:)).first {
+            return textTitle
+        }
+        if let table = displayBlocks.first(where: { $0.type == .table }) {
+            let columns = max(table.tableHeaders.count, table.tableRows.first?.count ?? 0)
+            return columns > 0 ? "Table · \(columns) column\(columns == 1 ? "" : "s")" : "Table"
+        }
+        return "Untitled"
     }
 
     private var relativeDate: String {
@@ -2593,22 +2786,42 @@ struct LibraryNoteInspector: View {
             }
         }
         .onAppear {
-            editingText = note.text
+            resetEditingState()
             isEditing = true
             DispatchQueue.main.async { isEditorFocused = true }
         }
         .onChange(of: note.id) { _, _ in
-            editingText = note.text
+            resetEditingState()
             isEditing = true
             DispatchQueue.main.async { isEditorFocused = true }
         }
         .onChange(of: editRequestToken) { _, _ in
-            editingText = note.text
+            resetEditingState()
             isEditing = true
             DispatchQueue.main.async { isEditorFocused = true }
         }
         .onChange(of: note.text) { _, newValue in
-            if !isEditing { editingText = newValue }
+            if !isEditing {
+                editingText = newValue
+                editingBlocks = note.blocks
+            }
+        }
+    }
+
+    private func resetEditingState() {
+        editingText = note.text
+        let blocks = jottDisplayBlocks(from: note.blocks)
+        editingBlocks = blocks.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : blocks
+    }
+
+    private func textTitle(for block: Block) -> String? {
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            let value = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !(value.hasPrefix("|") && value.hasSuffix("|")) else { return nil }
+            return value.isEmpty ? nil : value
+        default:
+            return nil
         }
     }
 
@@ -2639,12 +2852,13 @@ struct LibraryNoteInspector: View {
             }
             Button(isEditing ? "Save" : "Edit") {
                 if isEditing {
-                    if let updated = viewModel.updateNote(note, text: editingText) {
+                    if let updated = viewModel.updateNote(note, blocks: editingBlocks) {
                         editingText = updated.text
+                        editingBlocks = updated.blocks
                         isEditing = false
                     }
                 } else {
-                    editingText = note.text
+                    resetEditingState()
                     isEditing = true
                 }
             }
@@ -2705,21 +2919,13 @@ struct LibraryNoteInspector: View {
     private var contentSection: some View {
         Group {
             if isEditing {
-                LibraryAIInlineEditor(
-                    text: $editingText,
-                    suggestion: nil,
-                    isDark: isDarkMode,
-                    onTextChange: nil,
-                    onSuggestionAccepted: {},
-                    onSuggestionDismissed: {}
-                )
-                .frame(minHeight: 220)
+                LibraryBlockEditor(blocks: $editingBlocks, isDarkMode: isDarkMode)
             } else {
-                NoteRichContentView(
-                    text: note.text,
+                NoteBlockRichContentView(
+                    blocks: displayBlocks,
                     isDarkMode: isDarkMode,
                     onTap: {
-                        editingText = note.text
+                        resetEditingState()
                         isEditing = true
                         isEditorFocused = true
                     }
@@ -2731,6 +2937,363 @@ struct LibraryNoteInspector: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .strokeBorder(Color.jottBorder.opacity(0.60), lineWidth: 1))
+    }
+}
+
+struct LibraryBlockEditor: View {
+    @Binding var blocks: [Block]
+    let isDarkMode: Bool
+    @State private var isToolbarVisible = true
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Content blocks with bottom padding so the pill doesn't overlap
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(blocks.indices, id: \.self) { index in
+                    switch blocks[index].type {
+                    case .table:
+                        LibraryStoredTableEditor(block: $blocks[index])
+                    default:
+                        LibraryAIInlineEditor(
+                            text: textBinding(for: index),
+                            suggestion: nil,
+                            isDark: isDarkMode,
+                            onTextChange: nil,
+                            onSuggestionAccepted: {},
+                            onSuggestionDismissed: {}
+                        )
+                        .frame(minHeight: minHeight(for: blocks[index]))
+                    }
+                }
+            }
+            .padding(.bottom, 52)
+
+            // Floating combined pill at the bottom
+            HStack(spacing: 4) {
+                if isToolbarVisible {
+                    HStack(spacing: 2) {
+                        LibraryEditFormatBar(blocks: $blocks)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
+                    .animation(.spring(response: 0.28, dampingFraction: 0.80), value: isToolbarVisible)
+
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(width: 1, height: 13)
+                        .padding(.horizontal, 3)
+                }
+
+                Button(action: {}) {
+                    Image(systemName: "mic")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.18))
+                    .frame(width: 1, height: 13)
+                    .padding(.horizontal, 3)
+
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.80)) {
+                        isToolbarVisible.toggle()
+                    }
+                } label: {
+                    Image(systemName: isToolbarVisible ? "chevron.left" : "textformat")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.72))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help(isToolbarVisible ? "Hide formatting" : "Show formatting")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.jottOverlaySurface, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.jottBorder.opacity(0.7), lineWidth: 1))
+            .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 3)
+        }
+    }
+
+    private func minHeight(for block: Block) -> CGFloat {
+        max(44, CGFloat(max(1, block.markdown.components(separatedBy: "\n").count)) * 24)
+    }
+
+    private func textBinding(for index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard blocks.indices.contains(index) else { return "" }
+                return blocks[index].markdown
+            },
+            set: { newValue in
+                guard blocks.indices.contains(index) else { return }
+                let parsed = MarkdownConverter.parse(newValue)
+                blocks[index] = parsed.first ?? Block(type: .paragraph, spans: [TextSpan(newValue)])
+            }
+        )
+    }
+}
+
+private struct LibraryEditFormatBar: View {
+    @Binding var blocks: [Block]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            button("B", command: .bold, bold: true)
+            button("I", command: .italic, italic: true)
+            button("U", command: .underline, underline: true)
+            button("S", command: .strikethrough, strike: true)
+            icon("highlighter", command: .highlight)
+            sep
+            icon("list.bullet", command: .bulletList)
+            icon("list.number", command: .numberedList)
+            icon("checklist", command: .taskList)
+            icon("text.quote", command: .quote)
+            sep
+            icon("chevron.left.forwardslash.chevron.right", command: .inlineCode)
+            icon("textformat.size", command: .heading)
+            icon("link", command: .link)
+            tableMenu
+        }
+    }
+
+    private var sep: some View {
+        Rectangle().fill(Color.secondary.opacity(0.18)).frame(width: 1, height: 13).padding(.horizontal, 3)
+    }
+
+    private var tableMenu: some View {
+        Menu {
+            Button("2 x 2") { insertTable(rows: 2, columns: 2) }
+            Button("3 x 3") { insertTable(rows: 3, columns: 3) }
+            Button("4 x 4") { insertTable(rows: 4, columns: 4) }
+            Button("6 x 4") { insertTable(rows: 4, columns: 6) }
+        } label: {
+            Image(systemName: "tablecells")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func apply(_ command: JottTextFormatCommand) {
+        if JottTextFormatting.apply(command) { return }
+        if blocks.isEmpty {
+            blocks.append(Block(type: .paragraph, spans: [TextSpan("")]))
+        }
+        var draft = blocks[0].markdown
+        draft = JottTextFormatting.applying(command, to: draft)
+        blocks[0] = MarkdownConverter.parse(draft).first ?? Block(type: .paragraph, spans: [TextSpan(draft)])
+    }
+
+    private func insertTable(rows: Int, columns: Int) {
+        blocks.append(JottDraftTable(rows: rows, columns: columns).block)
+    }
+
+    private func button(_ label: String, command: JottTextFormatCommand, bold: Bool = false, italic: Bool = false, underline: Bool = false, strike: Bool = false) -> some View {
+        Button { apply(command) } label: {
+            Group {
+                if bold { Text(label).bold() }
+                else if italic { Text(label).italic() }
+                else if underline { Text(label).underline() }
+                else if strike { Text(label).strikethrough() }
+                else { Text(label) }
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+            .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(_ systemName: String, command: JottTextFormatCommand) -> some View {
+        Button { apply(command) } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct LibraryStoredTableEditor: View {
+    @Binding var block: Block
+    @FocusState private var focusedCell: String?
+
+    private var headers: [String] {
+        block.tableHeaders.isEmpty ? ["Column 1", "Column 2"] : block.tableHeaders
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
+                    tableGrid
+
+                    tableButton(systemName: "plus", width: 24, action: addColumn)
+                        .help("Add column")
+                        .padding(.top, 6)
+                }
+
+                tableButton(systemName: "plus", width: CGFloat(headers.count) * 112, action: addRow)
+                    .help("Add row")
+            }
+        }
+    }
+
+    private var tableGrid: some View {
+        Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(headers.indices, id: \.self) { column in
+                    cell(
+                        text: Binding(
+                            get: { header(column) },
+                            set: { setHeader($0, column: column) }
+                        ),
+                        id: "h-\(column)",
+                        isHeader: true
+                    )
+                }
+            }
+
+            ForEach(block.tableRows.indices, id: \.self) { row in
+                GridRow {
+                    ForEach(headers.indices, id: \.self) { column in
+                        cell(
+                            text: Binding(
+                                get: { value(row: row, column: column) },
+                                set: { setValue($0, row: row, column: column) }
+                            ),
+                            id: "\(row)-\(column)",
+                            isHeader: false
+                        )
+                    }
+                }
+            }
+        }
+        .background(Color.secondary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(Color.jottBorder.opacity(0.7), lineWidth: 1))
+    }
+
+    private func tableButton(systemName: String, width: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary.opacity(0.70))
+                .frame(width: width, height: 24)
+                .background(Color.jottOverlaySurface.opacity(0.94), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Color.jottBorder.opacity(0.55), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func cell(text: Binding<String>, id: String, isHeader: Bool) -> some View {
+        TextField("", text: text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: isHeader ? .semibold : .regular))
+            .foregroundColor(.primary.opacity(isHeader ? 0.90 : 0.82))
+            .focused($focusedCell, equals: id)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 112, minHeight: 34, alignment: .leading)
+            .background(isHeader ? Color.secondary.opacity(0.09) : Color.secondary.opacity(0.035))
+            .overlay(Rectangle()
+                .stroke(Color.jottBorder.opacity(focusedCell == id ? 0.95 : 0.55),
+                        lineWidth: focusedCell == id ? 1.1 : 0.55))
+    }
+
+    private func header(_ column: Int) -> String {
+        ensureTableShape()
+        return block.tableHeaders.indices.contains(column) ? block.tableHeaders[column] : ""
+    }
+
+    private func setHeader(_ value: String, column: Int) {
+        ensureTableShape()
+        while block.tableHeaders.count <= column {
+            block.tableHeaders.append("Column \(block.tableHeaders.count + 1)")
+        }
+        block.tableHeaders[column] = value
+    }
+
+    private func value(row: Int, column: Int) -> String {
+        ensureTableShape()
+        guard block.tableRows.indices.contains(row), block.tableRows[row].indices.contains(column) else { return "" }
+        return block.tableRows[row][column]
+    }
+
+    private func setValue(_ value: String, row: Int, column: Int) {
+        ensureTableShape()
+        guard block.tableRows.indices.contains(row) else { return }
+        while block.tableRows[row].count <= column {
+            block.tableRows[row].append("")
+        }
+        block.tableRows[row][column] = value
+    }
+
+    private func addRow() {
+        ensureTableShape()
+        block.tableRows.append(Array(repeating: "", count: block.tableHeaders.count))
+    }
+
+    private func addColumn() {
+        ensureTableShape()
+        block.tableHeaders.append("Column \(block.tableHeaders.count + 1)")
+        for row in block.tableRows.indices {
+            block.tableRows[row].append("")
+        }
+    }
+
+    private func ensureTableShape() {
+        if block.tableHeaders.isEmpty {
+            block.tableHeaders = ["Column 1", "Column 2"]
+        }
+        if block.tableRows.isEmpty {
+            block.tableRows = [Array(repeating: "", count: block.tableHeaders.count)]
+        }
+        for row in block.tableRows.indices where block.tableRows[row].count < block.tableHeaders.count {
+            block.tableRows[row] += Array(repeating: "", count: block.tableHeaders.count - block.tableRows[row].count)
+        }
+    }
+}
+
+private final class JottLibraryTextView: NSTextView {
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            JottTextFormattingRegistry.activeTextView = self
+        }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned, JottTextFormattingRegistry.activeTextView === self {
+            JottTextFormattingRegistry.activeTextView = nil
+        }
+        return resigned
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.command),
+              !modifiers.contains(.shift),
+              !modifiers.contains(.option),
+              !modifiers.contains(.control) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch event.charactersIgnoringModifiers {
+        case "b": JottTextFormatting.apply(.bold, to: self); return true
+        case "i": JottTextFormatting.apply(.italic, to: self); return true
+        case "u": JottTextFormatting.apply(.underline, to: self); return true
+        case "e": JottTextFormatting.apply(.inlineCode, to: self); return true
+        default: return super.performKeyEquivalent(with: event)
+        }
     }
 }
 
@@ -2751,7 +3314,7 @@ private struct LibraryAIInlineEditor: NSViewRepresentable {
         scrollView.borderType = .noBorder
         scrollView.autohidesScrollers = true
 
-        let textView = NSTextView()
+        let textView = JottLibraryTextView()
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.isEditable = true
@@ -2820,6 +3383,7 @@ private struct LibraryAIInlineEditor: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+            JottTextFormattingRegistry.activeTextView = textView
             guard let ghostStart else { return true }
             let totalLength = textView.textStorage?.length ?? 0
             if totalLength > ghostStart {
@@ -2832,6 +3396,7 @@ private struct LibraryAIInlineEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            JottTextFormattingRegistry.activeTextView = textView
             let newText = textView.string
             parent.text = newText
             parent.onTextChange?(newText)
@@ -2863,6 +3428,18 @@ private struct LibraryAIInlineEditor: NSViewRepresentable {
                 }
                 self.ghostStart = nil
                 parent.onSuggestionDismissed()
+                return true
+            }
+
+            if selector == #selector(NSResponder.insertNewline(_:)) ||
+               selector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+                if JottTextFormatting.handleContinuationNewline(in: textView) { return true }
+                textView.insertText("\n", replacementRange: textView.selectedRange())
+                return true
+            }
+
+            if selector == #selector(NSResponder.insertTab(_:)),
+               JottTextFormatting.handleTab(in: textView) {
                 return true
             }
 
