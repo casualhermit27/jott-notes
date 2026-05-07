@@ -74,54 +74,22 @@ func jottRelativeDate(_ date: Date) -> String {
 // MARK: - Note preview helper
 
 func jottNotePreview(_ note: Note) -> (title: String, body: String) {
-    let lines = note.text.components(separatedBy: "\n")
-    let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    func isPreviewNoise(_ line: String) -> Bool {
-        let t = line.trimmingCharacters(in: .whitespaces)
-        return t.hasPrefix("![") ||
-               t.hasPrefix("[") ||
-               t.hasPrefix("http") ||
-               MarkdownConverter.isPotentialMarkdownTableLine(t)
+    let textLines = note.blocks.compactMap { block -> String? in
+        switch block.type {
+        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            let value = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        case .table:
+            let columns = max(block.tableHeaders.count, block.tableRows.first?.count ?? 0)
+            let rows = block.tableRows.count
+            return columns > 0 ? "Table · \(columns) column\(columns == 1 ? "" : "s") · \(rows) row\(rows == 1 ? "" : "s")" : "Table"
+        default:
+            return nil
+        }
     }
 
-    var previewLines: [String] = []
-    var i = 0
-    while i < lines.count {
-        let t = lines[i].trimmingCharacters(in: .whitespaces)
-        if t.isEmpty {
-            i += 1
-            continue
-        }
-        if MarkdownConverter.isPotentialMarkdownTableLine(t) {
-            i += 1
-            while i < lines.count, MarkdownConverter.isPotentialMarkdownTableLine(lines[i].trimmingCharacters(in: .whitespaces)) {
-                i += 1
-            }
-            continue
-        }
-        if !isPreviewNoise(lines[i]) {
-            previewLines.append(lines[i])
-        }
-        i += 1
-    }
-
-    let titleLine = previewLines.first ?? nonEmpty.first(where: { !isPreviewNoise($0) }) ?? ""
-
-    var title = titleLine.trimmingCharacters(in: .whitespaces)
-    while title.hasPrefix("#") { title = String(title.dropFirst()) }
-    title = title.trimmingCharacters(in: .whitespaces)
-    if title.isEmpty { title = note.text.contains("|") ? "Table" : "Untitled" }
-
-    let bodyLines = previewLines.dropFirst().prefix(2)
-    var body = bodyLines
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .filter { !$0.isEmpty && !isPreviewNoise($0) }
-        .joined(separator: " ")
-    if body.isEmpty, note.text.contains("|"), title != "Table" {
-        body = "Table"
-    }
-
+    let title = textLines.first ?? "Untitled"
+    let body = textLines.dropFirst().prefix(2).joined(separator: " ")
     return (title, body)
 }
 

@@ -44,7 +44,13 @@ struct IOSInstantCaptureSheet: View {
     @State private var blocks: [Block] = []
 
     private var ds: JottDS { JottDS(isDark: scheme == .dark) }
-    private var exportedText: String { MarkdownConverter.export(blocks.filter { $0.type != .table }) }
+    private var capturedPlainText: String {
+        blocks
+            .filter { $0.type != .table }
+            .map(\.plainText)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         NavigationStack {
@@ -109,8 +115,8 @@ struct IOSInstantCaptureSheet: View {
 
                 Spacer()
 
-                if !exportedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("\(exportedText.split(whereSeparator: \.isWhitespace).count) words")
+                if !capturedPlainText.isEmpty {
+                    Text("\(capturedPlainText.split(whereSeparator: \.isWhitespace).count) words")
                         .font(.jottMono(10))
                         .foregroundStyle(Color.white.opacity(0.42))
                         .tracking(0.4)
@@ -148,7 +154,7 @@ struct IOSInstantCaptureSheet: View {
     private var canSave: Bool {
         blocks.contains { b in
             b.type == .table ? !b.tableHeaders.isEmpty
-                             : !MarkdownConverter.export([b]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                             : !b.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 }
@@ -207,7 +213,7 @@ struct IOSNewNoteComposerView: View {
     private var canSave: Bool {
         blocks.contains { b in
             b.type == .table ? !b.tableHeaders.isEmpty
-                             : !MarkdownConverter.export([b]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                             : !b.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 }

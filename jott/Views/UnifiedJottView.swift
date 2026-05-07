@@ -30,7 +30,6 @@ enum JottTextFormatting {
     @discardableResult
     static func apply(_ command: JottTextFormatCommand, fallbackText: inout String) -> Bool {
         if let tv = targetTextView(), apply(command, to: tv) { return true }
-        fallbackText = applying(command, to: fallbackText)
         return false
     }
 
@@ -41,54 +40,16 @@ enum JottTextFormatting {
     }
 
     static func applying(_ command: JottTextFormatCommand, to text: String) -> String {
-        switch command {
-        case .bold:          return wrapWhole(text, marker: "**")
-        case .italic:        return wrapWhole(text, marker: "*")
-        case .underline:     return wrapWhole(text, marker: "__")
-        case .strikethrough: return wrapWhole(text, marker: "~~")
-        case .highlight:     return wrapWhole(text, marker: "==")
-        case .inlineCode:    return wrapWhole(text, marker: "`")
-        case .link:          return text.isEmpty ? "[text](url)" : "[\(text)](url)"
-        case .heading:       return prefixLines(text, prefix: "# ")
-        case .bulletList:    return prefixLines(text, prefix: "- ")
-        case .numberedList:  return numberLines(text)
-        case .taskList:      return prefixLines(text, prefix: "- [ ] ")
-        case .quote:         return prefixLines(text, prefix: "> ")
-        case .codeBlock:     return "```\n\(text)\n```"
-        case .table(let rows, let columns):
-            return text + tableMarkdown(rows: rows, columns: columns, needsLeadingNewline: !text.isEmpty)
-        }
+        text
     }
 
     @discardableResult
     static func handleContinuationNewline(in tv: NSTextView) -> Bool {
-        guard tv.selectedRange().length == 0 else { return false }
-        guard let continuation = lineContinuation(in: tv) else { return false }
-        if continuation.shouldExit {
-            tv.insertText("", replacementRange: continuation.markerRange)
-            tv.insertText("\n", replacementRange: tv.selectedRange())
-        } else {
-            tv.insertText("\n\(continuation.nextPrefix)", replacementRange: tv.selectedRange())
-        }
-        return true
+        false
     }
 
     @discardableResult
     static func handleTab(in tv: NSTextView) -> Bool {
-        guard tv.selectedRange().length == 0 else { return false }
-        let (line, lineStart) = lineTextBeforeCursor(in: tv)
-        if line == ". " || line == "." {
-            tv.insertText("- ", replacementRange: NSRange(location: lineStart, length: (line as NSString).length))
-            return true
-        }
-        if line == "> " || line == ">" {
-            tv.insertText("> ", replacementRange: NSRange(location: lineStart, length: (line as NSString).length))
-            return true
-        }
-        if firstMatch(in: line, pattern: #"^\s*(- |\* |\+ |• |\d+\. |- \[[ xX]\] |> )"#) != nil {
-            tv.insertText("  ", replacementRange: NSRange(location: lineStart, length: 0))
-            return true
-        }
         return false
     }
 
@@ -105,163 +66,7 @@ enum JottTextFormatting {
     @discardableResult
     static func apply(_ command: JottTextFormatCommand, to tv: NSTextView) -> Bool {
         JottTextFormattingRegistry.activeTextView = tv
-        switch command {
-        case .bold:          wrapSelection(in: tv, marker: "**")
-        case .italic:        wrapSelection(in: tv, marker: "*")
-        case .underline:     wrapSelection(in: tv, marker: "__")
-        case .strikethrough: wrapSelection(in: tv, marker: "~~")
-        case .highlight:     wrapSelection(in: tv, marker: "==")
-        case .inlineCode:    wrapSelection(in: tv, marker: "`")
-        case .link:          insertLink(in: tv)
-        case .heading:       transformSelectedLines(in: tv, prefix: "# ")
-        case .bulletList:    transformSelectedLines(in: tv, prefix: "- ")
-        case .numberedList:  transformSelectedLines(in: tv, numbered: true)
-        case .taskList:      transformSelectedLines(in: tv, prefix: "- [ ] ")
-        case .quote:         transformSelectedLines(in: tv, prefix: "> ")
-        case .codeBlock:     wrapSelection(in: tv, marker: "```\n", closingMarker: "\n```")
-        case .table(let rows, let columns):
-            insertTable(in: tv, rows: rows, columns: columns)
-        }
-        return true
-    }
-
-    private static func wrapSelection(in tv: NSTextView, marker: String, closingMarker: String? = nil) {
-        let close = closingMarker ?? marker
-        let sel = tv.selectedRange()
-        if sel.length > 0 {
-            let selected = (tv.string as NSString).substring(with: sel)
-            tv.insertText("\(marker)\(selected)\(close)", replacementRange: sel)
-        } else {
-            let pos = sel.location
-            tv.insertText("\(marker)\(close)", replacementRange: sel)
-            tv.setSelectedRange(NSRange(location: pos + (marker as NSString).length, length: 0))
-        }
-    }
-
-    private static func insertLink(in tv: NSTextView) {
-        let sel = tv.selectedRange()
-        if sel.length > 0 {
-            let selected = (tv.string as NSString).substring(with: sel)
-            tv.insertText("[\(selected)](url)", replacementRange: sel)
-        } else {
-            let pos = sel.location
-            tv.insertText("[text](url)", replacementRange: sel)
-            tv.setSelectedRange(NSRange(location: pos + 1, length: 4))
-        }
-    }
-
-    private static func insertTable(in tv: NSTextView, rows: Int, columns: Int) {
-        let str = tv.string as NSString
-        let sel = tv.selectedRange()
-        let needsLeading = sel.location > 0 && !str.substring(to: sel.location).hasSuffix("\n")
-        tv.insertText(tableMarkdown(rows: rows, columns: columns, needsLeadingNewline: needsLeading), replacementRange: sel)
-    }
-
-    private static func transformSelectedLines(in tv: NSTextView, prefix: String? = nil, numbered: Bool = false) {
-        let ns = tv.string as NSString
-        let selected = tv.selectedRange()
-        let lineRange = ns.lineRange(for: selected)
-        let selectedText = ns.substring(with: lineRange)
-        let hasTrailingNewline = selectedText.hasSuffix("\n")
-        var lines = selectedText.components(separatedBy: "\n")
-        if hasTrailingNewline { lines.removeLast() }
-        var number = 1
-        let transformed = lines.map { line -> String in
-            let stripped = stripBlockPrefix(line)
-            if stripped.trimmingCharacters(in: .whitespaces).isEmpty { return stripped }
-            if numbered {
-                defer { number += 1 }
-                return "\(number). \(stripped)"
-            }
-            return "\(prefix ?? "")\(stripped)"
-        }.joined(separator: "\n") + (hasTrailingNewline ? "\n" : "")
-        tv.insertText(transformed, replacementRange: lineRange)
-        tv.setSelectedRange(NSRange(location: lineRange.location + (transformed as NSString).length, length: 0))
-    }
-
-    private struct Continuation {
-        let nextPrefix: String
-        let markerRange: NSRange
-        let shouldExit: Bool
-    }
-
-    private static func lineContinuation(in tv: NSTextView) -> Continuation? {
-        let (line, lineStart) = lineTextBeforeCursor(in: tv)
-        guard let match = firstMatch(in: line, pattern: #"^(\s*)(- \[[ xX]\] |- |\* |\+ |• |> |\d+\. )"#) else {
-            return nil
-        }
-        let marker = (line as NSString).substring(with: match.range)
-        let rest = (line as NSString).substring(from: match.range.length)
-        let markerRange = NSRange(location: lineStart, length: match.range.length)
-        let empty = rest.trimmingCharacters(in: .whitespaces).isEmpty
-        if empty {
-            return Continuation(nextPrefix: "", markerRange: markerRange, shouldExit: true)
-        }
-        if marker.range(of: #"^\s*\d+\. "#, options: .regularExpression) != nil {
-            let trimmed = marker.trimmingCharacters(in: .whitespaces)
-            let numberText = trimmed.split(separator: ".").first.map(String.init) ?? "1"
-            let next = (Int(numberText) ?? 1) + 1
-            let indent = String(marker.prefix { $0 == " " || $0 == "\t" })
-            return Continuation(nextPrefix: "\(indent)\(next). ", markerRange: markerRange, shouldExit: false)
-        }
-        if marker.trimmingCharacters(in: .whitespaces).hasPrefix("- [") {
-            let indent = String(marker.prefix { $0 == " " || $0 == "\t" })
-            return Continuation(nextPrefix: "\(indent)- [ ] ", markerRange: markerRange, shouldExit: false)
-        }
-        return Continuation(nextPrefix: marker, markerRange: markerRange, shouldExit: false)
-    }
-
-    private static func lineTextBeforeCursor(in tv: NSTextView) -> (text: String, lineStart: Int) {
-        let str = tv.string as NSString
-        let cursor = tv.selectedRange().location
-        let lineRange = str.lineRange(for: NSRange(location: cursor, length: 0))
-        let len = cursor - lineRange.location
-        let text = len > 0 ? str.substring(with: NSRange(location: lineRange.location, length: len)) : ""
-        return (text, lineRange.location)
-    }
-
-    private static func stripBlockPrefix(_ line: String) -> String {
-        guard let match = firstMatch(in: line, pattern: #"^\s*(#{1,3}\s+|> |- \[[ xX]\] |- |\* |\+ |• |\d+\. )"#) else {
-            return line
-        }
-        return (line as NSString).substring(from: match.range.length)
-    }
-
-    private static func firstMatch(in text: String, pattern: String) -> NSTextCheckingResult? {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        return regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length))
-    }
-
-    private static func wrapWhole(_ text: String, marker: String) -> String {
-        text.isEmpty ? "\(marker)\(marker)" : "\(marker)\(text)\(marker)"
-    }
-
-    private static func prefixLines(_ text: String, prefix: String) -> String {
-        text.components(separatedBy: "\n").map {
-            let stripped = stripBlockPrefix($0)
-            return stripped.trimmingCharacters(in: .whitespaces).isEmpty ? stripped : "\(prefix)\(stripped)"
-        }.joined(separator: "\n")
-    }
-
-    private static func numberLines(_ text: String) -> String {
-        var n = 1
-        return text.components(separatedBy: "\n").map {
-            let stripped = stripBlockPrefix($0)
-            guard !stripped.trimmingCharacters(in: .whitespaces).isEmpty else { return stripped }
-            defer { n += 1 }
-            return "\(n). \(stripped)"
-        }.joined(separator: "\n")
-    }
-
-    private static func tableMarkdown(rows: Int, columns: Int, needsLeadingNewline: Bool) -> String {
-        let r = max(1, min(rows, 12))
-        let c = max(1, min(columns, 8))
-        let headers = (1...c).map { "Column \($0)" }
-        let header = "| " + headers.joined(separator: " | ") + " |"
-        let separator = "| " + Array(repeating: "---", count: c).joined(separator: " | ") + " |"
-        let body = Array(repeating: "| " + Array(repeating: "", count: c).joined(separator: " | ") + " |", count: r)
-        let table = ([header, separator] + body).joined(separator: "\n")
-        return (needsLeadingNewline ? "\n\n" : "") + table + "\n"
+        return false
     }
 }
 
@@ -359,6 +164,8 @@ private struct JottKbdChip: View {
 
 struct UnifiedJottView: View {
     @ObservedObject var viewModel: OverlayViewModel
+    @StateObject private var purchases = PurchaseManager.shared
+    @State private var showPaywall = false
 
     var showDetail: Bool {
         viewModel.selectedNote != nil || viewModel.selectedReminder != nil
@@ -391,6 +198,12 @@ struct UnifiedJottView: View {
         .frame(width: viewModel.panelDisplayWidth, height: 640, alignment: .top)
         .colorScheme(.dark)
         .jottAppTypography()
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jottShowPaywall)) { _ in
+            showPaywall = true
+        }
     }
 }
 
@@ -590,6 +403,8 @@ struct JottCaptureView: View {
             }
 
             Spacer()
+            // Lock state is shown between status and the right-side lock button so the
+            // user always knows which mode is active.
 
             if isSaved {
                 HStack(spacing: 3) {
@@ -614,12 +429,24 @@ struct JottCaptureView: View {
             if viewModel.clipboardPrefilled {
                 clipboardOfferButton
             }
+
+            // Lock button — mirrors "?" on the left, always rightmost.
+            Button { viewModel.isLocked.toggle() } label: {
+                Image(systemName: viewModel.isLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(viewModel.isLocked ? Color.jottOverlayPeachAccent : .white.opacity(0.28))
+                    .frame(width: 20, height: 20)
+                    .background(viewModel.isLocked ? Color.jottOverlayPeachAccent.opacity(0.15) : Color.white.opacity(0.06))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(viewModel.isLocked ? "Locked — ESC or ⌥⌥ to dismiss" : "Unlocked — click to lock")
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
         .padding(.bottom, 10)
         .colorScheme(.dark)
-        .animation(JottMotion.content, value: isSaved || viewModel.clipboardPrefilled)
+        .animation(JottMotion.content, value: isSaved || viewModel.clipboardPrefilled || viewModel.isLocked)
     }
 
     @ViewBuilder private var clipboardOfferButton: some View {
@@ -2718,9 +2545,9 @@ private enum JottTransferPayload {
                 ],
                 documentAttributes: nil
            ) {
-            let md = richTextToMarkdown(attrStr).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !md.isEmpty {
-                return md
+            let text = richTextToPlainText(attrStr).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                return text
             }
         }
 
@@ -2797,7 +2624,7 @@ private enum JottTransferPayload {
         return false
     }
 
-    static func richTextToMarkdown(_ attrStr: NSAttributedString) -> String {
+    static func richTextToPlainText(_ attrStr: NSAttributedString) -> String {
         var result = ""
         attrStr.enumerateAttributes(in: NSRange(location: 0, length: attrStr.length), options: []) { attrs, range, _ in
             var chunk = (attrStr.string as NSString).substring(with: range)
@@ -3004,7 +2831,7 @@ final class JottDropReceivingView: NSView {
 }
 
 private extension NSAttributedString.Key {
-    /// Marks ghost-text ranges in JottNativeInput so extractMarkdown can skip them.
+    /// Marks ghost-text ranges in JottNativeInput so extractText can skip them.
     static let jottGhost = NSAttributedString.Key("com.jott.ghostText")
 }
 
@@ -3084,12 +2911,12 @@ struct JottNativeInput: NSViewRepresentable {
             : NSColor(white: 0.74, alpha: 1)
         let editorFont = NSFont.systemFont(ofSize: 17)
 
-        // Only reset content if the markdown doesn't already match (avoids wiping inline images)
+        // Only reset content if the markup doesn't already match (avoids wiping inline images)
         let coord = context.coordinator
 
-        // Extract current actual (non-ghost) markdown for comparison
-        let currentMarkdown = tv.textStorage.map { Coordinator.extractMarkdown(from: $0) } ?? tv.string
-        if currentMarkdown != text {
+        // Extract current actual (non-ghost) markup for comparison
+        let currentText = tv.textStorage.map { Coordinator.extractText(from: $0) } ?? tv.string
+        if currentText != text {
             if text.isEmpty {
                 tv.textStorage?.setAttributedString(NSAttributedString(string: ""))
                 coord.ghostStart = nil
@@ -3098,8 +2925,6 @@ struct JottNativeInput: NSViewRepresentable {
                     Coordinator.attributedString(from: text, font: editorFont, textColor: textColor)
                 )
                 coord.ghostStart = nil
-                // Apply syntax highlighting on initial load
-                tv.textStorage?.applyMarkdownHighlighting(baseFont: editorFont, baseColor: textColor, isDark: isDark, ghostStart: coord.ghostStart)
             }
             DispatchQueue.main.async { [weak tv] in
                 guard let tv else { return }
@@ -3213,7 +3038,7 @@ struct JottNativeInput: NSViewRepresentable {
             storage.removeAttribute(.jottGhost, range: ghostRange)
             storage.addAttribute(.foregroundColor, value: realColor, range: ghostRange)
             ghostStart = nil
-            parent.text = Self.extractMarkdown(from: storage)
+            parent.text = Self.extractText(from: storage)
             parent.onSuggestionAccepted?()
             tv.setSelectedRange(NSRange(location: storage.length, length: 0))
         }
@@ -3246,7 +3071,7 @@ struct JottNativeInput: NSViewRepresentable {
             }
 
             let attachment = ImageTextAttachment()
-            attachment.markdownPath = path
+            attachment.attachmentPath = path
             attachment.image = thumb
             attachment.bounds = NSRect(x: 0, y: -6, width: thumbSize.width, height: thumbSize.height)
 
@@ -3255,16 +3080,16 @@ struct JottNativeInput: NSViewRepresentable {
             return attrStr
         }
 
-        static func attributedString(from markdown: String, font: NSFont, textColor: NSColor) -> NSAttributedString {
+        static func attributedString(from markup: String, font: NSFont, textColor: NSColor) -> NSAttributedString {
             guard let regex = inlineImageRegex else {
                 return NSAttributedString(
-                    string: markdown,
+                    string: markup,
                     attributes: [.font: font, .foregroundColor: textColor]
                 )
             }
 
-            let nsMarkdown = markdown as NSString
-            let fullRange = NSRange(location: 0, length: nsMarkdown.length)
+            let nsText = markup as NSString
+            let fullRange = NSRange(location: 0, length: nsText.length)
             let result = NSMutableAttributedString()
             let baseAttrs: [NSAttributedString.Key: Any] = [
                 .font: font,
@@ -3272,14 +3097,14 @@ struct JottNativeInput: NSViewRepresentable {
             ]
 
             var cursor = 0
-            for match in regex.matches(in: markdown, range: fullRange) {
+            for match in regex.matches(in: markup, range: fullRange) {
                 if match.range.location > cursor {
                     let plainRange = NSRange(location: cursor, length: match.range.location - cursor)
-                    result.append(NSAttributedString(string: nsMarkdown.substring(with: plainRange), attributes: baseAttrs))
+                    result.append(NSAttributedString(string: nsText.substring(with: plainRange), attributes: baseAttrs))
                 }
 
-                if let pathRange = Range(match.range(at: 2), in: markdown) {
-                    let path = String(markdown[pathRange])
+                if let pathRange = Range(match.range(at: 2), in: markup) {
+                    let path = String(markup[pathRange])
                     if let attachment = inlineAttachment(for: path, font: font) {
                         result.append(attachment)
                     }
@@ -3288,16 +3113,16 @@ struct JottNativeInput: NSViewRepresentable {
                 cursor = match.range.location + match.range.length
             }
 
-            if cursor < nsMarkdown.length {
-                result.append(NSAttributedString(string: nsMarkdown.substring(from: cursor), attributes: baseAttrs))
+            if cursor < nsText.length {
+                result.append(NSAttributedString(string: nsText.substring(from: cursor), attributes: baseAttrs))
             }
 
             return result
         }
 
-        /// Converts the textStorage content back to markdown, replacing ImageTextAttachments.
+        /// Converts the textStorage content back to markup, replacing ImageTextAttachments.
         /// Skips any ranges marked with .jottGhost (AI suggestion text).
-        static func extractMarkdown(from storage: NSTextStorage) -> String {
+        static func extractText(from storage: NSTextStorage) -> String {
             var result = ""
             storage.enumerateAttributes(
                 in: NSRange(location: 0, length: storage.length), options: []
@@ -3305,7 +3130,7 @@ struct JottNativeInput: NSViewRepresentable {
                 // Skip ghost text
                 if attrs[.jottGhost] != nil { return }
                 if let att = attrs[.attachment] as? ImageTextAttachment {
-                    result += "![](\(att.markdownPath))"
+                    result += "![](\(att.attachmentPath))"
                 } else {
                     // Strip U+FFFC (object replacement char) from non-image attachment runs
                     let chunk = (storage.string as NSString).substring(with: range)
@@ -3321,7 +3146,7 @@ struct JottNativeInput: NSViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementString: String?) -> Bool {
             JottTextFormattingRegistry.activeTextView = tv
-            // Strip ghost text before any real edit so extractMarkdown stays clean
+            // Strip ghost text before any real edit so extractText stays clean
             if ghostStart != nil {
                 stripGhostText(from: tv)
                 DispatchQueue.main.async { self.parent.onSuggestionDismissed?() }
@@ -3334,7 +3159,7 @@ struct JottNativeInput: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView,
                   let storage = tv.textStorage else { return }
             JottTextFormattingRegistry.activeTextView = tv
-            parent.text = Self.extractMarkdown(from: storage)
+            parent.text = Self.extractText(from: storage)
             var hasInlineAttachment = false
             storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, _, stop in
                 if value != nil {
@@ -3345,14 +3170,6 @@ struct JottNativeInput: NSViewRepresentable {
             if hasInlineAttachment {
                 parent.viewModel.persistCurrentNoteDraftImmediately()
             }
-            // Re-apply syntax highlighting without triggering another textDidChange
-            isApplyingAttributes = true
-            let selectedRange = tv.selectedRange()
-            let baseFont = tv.font ?? NSFont.systemFont(ofSize: 17)
-            let baseColor: NSColor = parent.isDark ? NSColor(white: 0.92, alpha: 1) : NSColor.jottInputText
-            storage.applyMarkdownHighlighting(baseFont: baseFont, baseColor: baseColor, isDark: parent.isDark, ghostStart: ghostStart)
-            tv.setSelectedRange(selectedRange)
-            isApplyingAttributes = false
             reportHeight(from: tv)
         }
 
@@ -3570,9 +3387,9 @@ struct JottNativeInput: NSViewRepresentable {
     }
 }
 
-/// NSTextAttachment subclass that carries its markdown path so we can round-trip it.
+/// NSTextAttachment subclass that carries its markup path so we can round-trip it.
 final class ImageTextAttachment: NSTextAttachment {
-    var markdownPath: String = ""
+    var attachmentPath: String = ""
 }
 
 final class JottNSTextView: NSTextView {
@@ -3659,13 +3476,13 @@ final class JottNSTextView: NSTextView {
         let path = String(token.dropFirst(4).dropLast())
         let url = MainActor.assumeIsolated { NoteStore.shared.attachmentURL(for: path) }
         guard let image = NSImage(contentsOf: url) else { return false }
-        return insertImage(image, markdownPath: path)
+        return insertImage(image, attachmentPath: path)
     }
 
-    private func insertImage(_ image: NSImage, markdownPath: String? = nil) -> Bool {
+    private func insertImage(_ image: NSImage, attachmentPath: String? = nil) -> Bool {
         let path: String
-        if let markdownPath {
-            path = markdownPath
+        if let attachmentPath {
+            path = attachmentPath
         } else {
             guard let tiff = image.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiff),
@@ -3688,7 +3505,7 @@ final class JottNSTextView: NSTextView {
         }
 
         let attachment = ImageTextAttachment()
-        attachment.markdownPath = path
+        attachment.attachmentPath = path
         attachment.image = thumb
         attachment.bounds = NSRect(x: 0, y: -6, width: thumbSize.width, height: thumbSize.height)
 
@@ -3788,13 +3605,13 @@ final class JottNSTextView: NSTextView {
         let pb = NSPasteboard.general
         if insertTransfer(from: pb) { return }
         // Don't let NSTextView paste raw NSTextAttachment for images — it produces
-        // unrenderable ￼ in the markdown. Just skip if it's image-only content.
+        // unrenderable ￼ in the markup. Just skip if it's image-only content.
         if JottTransferPayload.containsImageData(pb) { return }
         super.paste(sender)
     }
 
-    private func richTextToMarkdown(_ attrStr: NSAttributedString) -> String {
-        JottTransferPayload.richTextToMarkdown(attrStr)
+    private func richTextToPlainText(_ attrStr: NSAttributedString) -> String {
+        JottTransferPayload.richTextToPlainText(attrStr)
     }
 
     private func isVideoURL(_ text: String) -> Bool {

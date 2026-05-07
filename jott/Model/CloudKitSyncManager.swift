@@ -290,7 +290,6 @@ final class CloudKitSyncManager {
             recordType: RecordType.note,
             recordID: CKRecord.ID(recordName: "note-bootstrap")
         )
-        note[NoteKey.text] = "Bootstrap" as CKRecordValue
         note[NoteKey.blocksJSON] = "[]" as CKRecordValue
         note[NoteKey.tags] = ["bootstrap"] as CKRecordValue
         note[NoteKey.createdAt] = now as CKRecordValue
@@ -503,7 +502,8 @@ final class CloudKitSyncManager {
     }
 
     private func apply(note: Note, to record: CKRecord) {
-        // blocksJSON is the source of truth; text kept for cross-platform compat
+        // blocksJSON is the source of truth. The legacy text field is cleared so
+        // sync cannot rehydrate text shadows over structured data.
         if let data = try? JSONEncoder().encode(note.blocks),
            let json = String(data: data, encoding: .utf8) {
             record[NoteKey.blocksJSON] = json as CKRecordValue
@@ -512,7 +512,7 @@ final class CloudKitSyncManager {
         if !note.links.isEmpty {
             record[NoteKey.links] = note.links.map(\.uuidString) as CKRecordValue
         }
-        record[NoteKey.text]       = note.text as CKRecordValue
+        record[NoteKey.text]       = nil
         record[NoteKey.tags]       = note.tags as CKRecordValue
         record[NoteKey.createdAt]  = note.timestamp as CKRecordValue
         record[NoteKey.modifiedAt] = note.modifiedAt as CKRecordValue
@@ -549,7 +549,7 @@ final class CloudKitSyncManager {
         let tags       = record[NoteKey.tags] as? [String] ?? []
         let links: [UUID] = (record[NoteKey.links] as? [String] ?? []).compactMap { UUID(uuidString: $0) }
 
-        // Prefer structured blocks; fall back to parsing legacy text field
+        // Prefer structured blocks; fall back to legacy plain text only for old records.
         let blocks: [Block]
         if let json = record[NoteKey.blocksJSON] as? String,
            let data = json.data(using: .utf8),
@@ -557,7 +557,7 @@ final class CloudKitSyncManager {
            !decoded.isEmpty {
             blocks = decoded
         } else if let text = record[NoteKey.text] as? String, !text.isEmpty {
-            blocks = MarkdownConverter.parse(text)
+            blocks = Block.plainTextBlocks(from: text)
         } else {
             return nil
         }

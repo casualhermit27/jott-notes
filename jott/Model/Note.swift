@@ -15,10 +15,17 @@ struct Note: Identifiable, Equatable, Hashable {
     var folderId: UUID?
     var deletedAt: Date?
 
-    /// Backward-compat shim: get exports blocks as Markdown, set re-parses Markdown into blocks.
+    /// Compatibility view for old call sites. This is plain block text only,
+    /// never lightweight markup syntax and never a storage source of truth.
     var text: String {
-        get { MarkdownConverter.export(blocks) }
-        set { blocks = MarkdownConverter.parse(newValue) }
+        get { plainText }
+        set { blocks = Block.plainTextBlocks(from: newValue) }
+    }
+
+    var plainText: String {
+        blocks
+            .map(\.plainText)
+            .joined(separator: "\n")
     }
 
     /// Convenience title (first non-empty plain text from first block).
@@ -58,7 +65,7 @@ struct Note: Identifiable, Equatable, Hashable {
         self.deletedAt  = deletedAt
     }
 
-    /// Convenience: create a note from Markdown (used during migration and for new-note creation).
+    /// Convenience: create a note from plain text capture.
     init(id: UUID = UUID(),
          text: String,
          tags: [String] = [],
@@ -72,7 +79,7 @@ struct Note: Identifiable, Equatable, Hashable {
          folderId: UUID? = nil,
          deletedAt: Date? = nil) {
         self.id         = id
-        self.blocks     = MarkdownConverter.parse(text)
+        self.blocks     = Block.plainTextBlocks(from: text)
         self.links      = []
         self.tags       = tags
         self.timestamp  = timestamp
@@ -96,7 +103,7 @@ extension Note: Codable {
     enum CodingKeys: String, CodingKey {
         case id, blocks, links, tags, timestamp, modifiedAt
         case isPinned, clusterId, parentId, sortIndex, folderId, deletedAt
-        case text  // legacy fallback
+        case text  // legacy plain-text fallback
     }
 
     init(from decoder: Decoder) throws {
@@ -108,7 +115,7 @@ extension Note: Codable {
             blocks = decodedBlocks
         } else {
             let legacyText = (try? c.decode(String.self, forKey: .text)) ?? ""
-            blocks = MarkdownConverter.parse(legacyText)
+            blocks = Block.plainTextBlocks(from: legacyText)
         }
 
         links      = (try? c.decode([UUID].self, forKey: .links)) ?? []

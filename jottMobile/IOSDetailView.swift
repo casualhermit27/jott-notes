@@ -55,7 +55,7 @@ struct IOSDetailView: View {
         }
         .fullScreenCover(isPresented: $showNewSubnote) {
             IOSNewNoteComposerView(
-                title: "New Linked Note",
+                title: "New Subnote",
                 folderId: liveNote.folderId,
                 parentId: note.id
             ) { _ in
@@ -77,25 +77,45 @@ struct IOSDetailView: View {
     // MARK: - Read mode
 
     private var readView: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
-                metadataStrip
-                Rectangle().fill(ds.hairline).frame(height: 1).padding(.horizontal, 20)
+        let subnotes = noteStore.allNotes().filter { $0.parentId == note.id }
 
-                MarkdownRichView(
-                    text: liveNote.text,
-                    isDarkMode: scheme == .dark,
-                    onDoubleTap: { enterEditing() }
-                ) { paragraphText in
-                    IOSParagraphView(text: paragraphText, isDark: scheme == .dark)
+        return ZStack(alignment: .bottom) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    metadataStrip
+                    Rectangle().fill(ds.hairline).frame(height: 1).padding(.horizontal, 20)
+
+                    IOSBlockContentView(blocks: liveNote.blocks, isDark: scheme == .dark)
+                        .onTapGesture(count: 2) { enterEditing() }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+
+                    if !subnotes.isEmpty {
+                        subnotesSection
+                    } else {
+                        Spacer().frame(height: 100)
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-
-                subnotesSection
             }
+            .onTapGesture(count: 2) { enterEditing() }
+
+            Button { showNewSubnote = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 17, weight: .medium))
+                    Text("New Subnote")
+                        .font(.jottBody(15, weight: .medium))
+                }
+                .foregroundStyle(ds.accent)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 13)
+                .background(ds.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(ds.accent.opacity(0.22), lineWidth: 0.8))
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 28)
         }
-        .onTapGesture(count: 2) { enterEditing() }
     }
 
     // MARK: - Metadata strip
@@ -152,7 +172,7 @@ struct IOSDetailView: View {
         .padding(.bottom, 14)
     }
 
-    // MARK: - Subnotes section
+    // MARK: - Subnotes section (only rendered when subnotes exist)
 
     @ViewBuilder
     private var subnotesSection: some View {
@@ -162,31 +182,15 @@ struct IOSDetailView: View {
             Rectangle().fill(ds.hairline).frame(height: 1).padding(.horizontal, 20)
 
             HStack {
-                Text("LINKED NOTES")
+                Text("SUBNOTES")
                     .font(.jottMono(10, weight: .medium))
                     .foregroundStyle(ds.inkFaintest)
                     .tracking(0.6)
                 Spacer()
-                Button {
-                    showNewSubnote = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("New")
-                            .font(.jottCaption(12, weight: .medium))
-                    }
-                    .foregroundStyle(ds.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(ds.accentSoft, in: Capsule())
-                    .overlay(Capsule().strokeBorder(ds.accent.opacity(0.20), lineWidth: 0.8))
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
-            .padding(.bottom, subnotes.isEmpty ? 20 : 10)
+            .padding(.bottom, 10)
 
             ForEach(subnotes) { sub in
                 NavigationLink(value: sub) {
@@ -199,15 +203,7 @@ struct IOSDetailView: View {
                 }
             }
 
-            if subnotes.isEmpty {
-                Text("No linked notes yet")
-                    .font(.jottBody(13))
-                    .foregroundStyle(ds.inkFaintest)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-            } else {
-                Spacer().frame(height: 24)
-            }
+            Spacer().frame(height: 100)
         }
     }
 
@@ -268,7 +264,7 @@ struct IOSDetailView: View {
 
     private func enterEditing() {
         editBlocks = liveNote.blocks
-        withAnimation(JottMotion.content) { isEditing = true }
+        isEditing = true
     }
 
     private func commitEdit() {
@@ -278,7 +274,7 @@ struct IOSDetailView: View {
         updated.blocks = clean
         updated.modifiedAt = Date()
         noteStore.upsertNote(updated)
-        withAnimation(JottMotion.content) { isEditing = false }
+        isEditing = false
     }
 
     private func scheduleAutosave(blocks newBlocks: [Block]) {
@@ -305,13 +301,13 @@ struct IOSDetailView: View {
     }
 }
 
-// MARK: - iOS Markdown Editor (UITextView + format toolbar)
+// MARK: - iOS block text editor (UITextView + format toolbar)
 
-struct IOSMarkdownEditor: UIViewRepresentable {
-    @Binding var text: String
+struct IOSBlockTextEditor: UIViewRepresentable {
+    @Binding var blocks: [Block]
     let isDark: Bool
     var autoFocus: Bool = false
-    var onTextChange: ((String) -> Void)?
+    var onBlocksChange: (([Block]) -> Void)?
     var onInsertTable: ((Int, Int) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -321,6 +317,7 @@ struct IOSMarkdownEditor: UIViewRepresentable {
         tv.delegate = context.coordinator
         tv.backgroundColor = .clear
         tv.font = UIFont.systemFont(ofSize: 16)
+        tv.text = context.coordinator.displayText(for: blocks)
         tv.textContainerInset = UIEdgeInsets(top: 12, left: 16, bottom: 80, right: 16)
         tv.keyboardDismissMode = .interactive
         context.coordinator.textView = tv
@@ -339,9 +336,11 @@ struct IOSMarkdownEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ tv: UITextView, context: Context) {
-        if tv.text != text {
+        context.coordinator.parent = self
+        let proposed = context.coordinator.displayText(for: blocks)
+        if tv.text != proposed {
             let sel = tv.selectedRange
-            tv.text = text
+            tv.text = proposed
             let len = (tv.text as NSString).length
             if sel.upperBound <= len { tv.selectedRange = sel }
         }
@@ -351,7 +350,7 @@ struct IOSMarkdownEditor: UIViewRepresentable {
     // MARK: - Coordinator
 
     final class Coordinator: NSObject, UITextViewDelegate {
-        var parent: IOSMarkdownEditor
+        var parent: IOSBlockTextEditor
         weak var textView: UITextView?
 
         // Voice input state
@@ -361,7 +360,54 @@ struct IOSMarkdownEditor: UIViewRepresentable {
         private var voiceStartLocation: Int? = nil
         private var voiceTextLength: Int = 0
 
-        init(_ parent: IOSMarkdownEditor) { self.parent = parent }
+        init(_ parent: IOSBlockTextEditor) { self.parent = parent }
+
+        func displayText(for blocks: [Block]) -> String {
+            var number = 1
+            return blocks.map { block in
+                let text = block.plainText
+                switch block.type {
+                case .bulletItem:
+                    number = 1
+                    return "• \(text)"
+                case .numberedItem:
+                    defer { number += 1 }
+                    return "\(number). \(text)"
+                case .taskItem:
+                    number = 1
+                    return "\(block.checked ? "☑" : "☐") \(text)"
+                case .quote:
+                    number = 1
+                    return "❝ \(text)"
+                case .heading:
+                    number = 1
+                    return text
+                default:
+                    number = 1
+                    return text
+                }
+            }.joined(separator: "\n")
+        }
+
+        func extractBlocks(from text: String) -> [Block] {
+            let lines = text.components(separatedBy: "\n")
+            let result = lines.map { line -> Block in
+                if line.hasPrefix("• ") {
+                    return Block(type: .bulletItem, spans: [TextSpan(String(line.dropFirst(2)))])
+                }
+                if line.hasPrefix("☐ ") || line.hasPrefix("☑ ") {
+                    return Block(type: .taskItem, spans: [TextSpan(String(line.dropFirst(2)))], checked: line.hasPrefix("☑ "))
+                }
+                if line.hasPrefix("❝ ") {
+                    return Block(type: .quote, spans: [TextSpan(String(line.dropFirst(2)))])
+                }
+                if let range = line.range(of: #"^\d+\. "#, options: .regularExpression) {
+                    return Block(type: .numberedItem, spans: [TextSpan(String(line[range.upperBound...]))])
+                }
+                return Block(type: .paragraph, spans: [TextSpan(line)])
+            }
+            return result.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : result
+        }
 
         func updateColors(isDark: Bool) {
             guard let tv = textView else { return }
@@ -375,8 +421,14 @@ struct IOSMarkdownEditor: UIViewRepresentable {
         }
 
         func textViewDidChange(_ tv: UITextView) {
-            parent.text = tv.text
-            parent.onTextChange?(tv.text)
+            let updated = extractBlocks(from: tv.text)
+            parent.blocks = updated
+            parent.onBlocksChange?(updated)
+        }
+
+        func textView(_ tv: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            guard text == "\n", range.length == 0 else { return true }
+            return !handleReturn(in: tv)
         }
 
         func registerMicButton(_ btn: UIButton, inkColor: UIColor, activeColor: UIColor) {
@@ -427,34 +479,131 @@ struct IOSMarkdownEditor: UIViewRepresentable {
             tv.replace(textRange, withText: insert)
             voiceTextLength = isFinal ? 0 : (insert as NSString).length
             if isFinal { voiceStartLocation = nil }
-            parent.text = tv.text
-            parent.onTextChange?(tv.text)
+            let updated = extractBlocks(from: tv.text)
+            parent.blocks = updated
+            parent.onBlocksChange?(updated)
         }
 
         // MARK: Format commands
 
         func wrapSelection(opening: String, closing: String) {
-            guard let tv = textView, let selRange = tv.selectedTextRange else { return }
-            let selected = tv.text(in: selRange) ?? ""
-            tv.replace(selRange, withText: opening + selected + closing)
-            if selected.isEmpty, let pos = tv.position(from: selRange.start, offset: opening.count) {
-                tv.selectedTextRange = tv.textRange(from: pos, to: pos)
-            }
-            parent.text = tv.text
+            // Inline span styling needs a native attributed-text pass. Keep this
+            // out of the text model so formatting buttons never inject markup.
         }
 
         func toggleLinePrefix(_ prefix: String) {
             guard let tv = textView else { return }
             let nsText = tv.text as NSString
             let cursor = tv.selectedRange.location
-            let lineNSRange = nsText.lineRange(for: NSRange(location: cursor, length: 0))
+            let lineNSRange = currentLineTextRange(in: tv, cursor: cursor)
             let line = nsText.substring(with: lineNSRange)
-            let newLine = line.hasPrefix(prefix) ? String(line.dropFirst(prefix.count)) : prefix + line
+            let stripped = strippedLinePrefix(from: line)
+            let newLine = line.hasPrefix(prefix) ? stripped : prefix + stripped
             guard let start = tv.position(from: tv.beginningOfDocument, offset: lineNSRange.location),
                   let end = tv.position(from: tv.beginningOfDocument, offset: lineNSRange.location + lineNSRange.length),
                   let range = tv.textRange(from: start, to: end) else { return }
             tv.replace(range, withText: newLine)
-            parent.text = tv.text
+            tv.selectedRange = NSRange(location: lineNSRange.location + (newLine as NSString).length, length: 0)
+            let updated = extractBlocks(from: tv.text)
+            parent.blocks = updated
+            parent.onBlocksChange?(updated)
+        }
+
+        @discardableResult
+        private func handleReturn(in tv: UITextView) -> Bool {
+            let nsText = tv.text as NSString
+            let cursor = tv.selectedRange.location
+            let lineRange = currentLineTextRange(in: tv, cursor: cursor)
+            let line = nsText.substring(with: lineRange)
+
+            if line.hasPrefix("• ") {
+                let content = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                if content.isEmpty {
+                    replaceText(in: tv, range: NSRange(location: lineRange.location, length: 2), with: "")
+                } else {
+                    insertText("\n• ", in: tv)
+                }
+                return true
+            }
+
+            if line.hasPrefix("☐ ") || line.hasPrefix("☑ ") {
+                let content = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                if content.isEmpty {
+                    replaceText(in: tv, range: NSRange(location: lineRange.location, length: 2), with: "")
+                } else {
+                    insertText("\n☐ ", in: tv)
+                }
+                return true
+            }
+
+            if line.hasPrefix("❝ ") {
+                let content = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                if content.isEmpty {
+                    replaceText(in: tv, range: NSRange(location: lineRange.location, length: 2), with: "")
+                } else {
+                    insertText("\n❝ ", in: tv)
+                }
+                return true
+            }
+
+            if let number = numberedPrefix(in: line) {
+                let content = (line as NSString).substring(from: number.length).trimmingCharacters(in: .whitespaces)
+                if content.isEmpty {
+                    replaceText(in: tv, range: NSRange(location: lineRange.location, length: number.length), with: "")
+                } else {
+                    insertText("\n\(number.value + 1). ", in: tv)
+                }
+                return true
+            }
+
+            return false
+        }
+
+        private func currentLineTextRange(in tv: UITextView, cursor: Int) -> NSRange {
+            let nsText = tv.text as NSString
+            let length = nsText.length
+            if cursor == length, length > 0, nsText.character(at: length - 1) == 10 {
+                return NSRange(location: cursor, length: 0)
+            }
+            let safeCursor = min(max(cursor, 0), length)
+            let fullLineRange = nsText.lineRange(for: NSRange(location: safeCursor, length: 0))
+            let hasNewline = fullLineRange.length > 0 && nsText.character(at: NSMaxRange(fullLineRange) - 1) == 10
+            return NSRange(location: fullLineRange.location, length: fullLineRange.length - (hasNewline ? 1 : 0))
+        }
+
+        private func numberedPrefix(in line: String) -> (value: Int, length: Int)? {
+            let nsLine = line as NSString
+            guard let match = try? NSRegularExpression(pattern: #"^(\d+)\. "#)
+                .firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)) else {
+                return nil
+            }
+            return (Int(nsLine.substring(with: match.range(at: 1))) ?? 1, match.range.length)
+        }
+
+        private func strippedLinePrefix(from line: String) -> String {
+            for prefix in ["• ", "☐ ", "☑ ", "❝ "] where line.hasPrefix(prefix) {
+                return String(line.dropFirst(prefix.count))
+            }
+            if let number = numberedPrefix(in: line) {
+                return (line as NSString).substring(from: number.length)
+            }
+            return line
+        }
+
+        private func insertText(_ text: String, in tv: UITextView) {
+            let selected = tv.selectedRange
+            replaceText(in: tv, range: selected, with: text)
+            tv.selectedRange = NSRange(location: selected.location + (text as NSString).length, length: 0)
+        }
+
+        private func replaceText(in tv: UITextView, range: NSRange, with text: String) {
+            guard let start = tv.position(from: tv.beginningOfDocument, offset: range.location),
+                  let end = tv.position(from: tv.beginningOfDocument, offset: range.location + range.length),
+                  let textRange = tv.textRange(from: start, to: end) else { return }
+            tv.replace(textRange, withText: text)
+            let updated = extractBlocks(from: tv.text)
+            parent.blocks = updated
+            parent.onBlocksChange?(updated)
         }
 
         func insertTable(rows: Int = 2, columns: Int = 2) {
@@ -470,13 +619,13 @@ struct IOSMarkdownEditor: UIViewRepresentable {
 // MARK: - Format toolbar (UIKit inputAccessoryView)
 
 private final class IOSFormatToolbarView: UIView {
-    private weak var coordinator: IOSMarkdownEditor.Coordinator?
+    private weak var coordinator: IOSBlockTextEditor.Coordinator?
 
-    init(coordinator: IOSMarkdownEditor.Coordinator, isDark: Bool) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 100, height: 104))
+    init(coordinator: IOSBlockTextEditor.Coordinator, isDark: Bool) {
+        super.init(frame: CGRect(x: 0, y: 0, width: 100, height: 52))
         self.coordinator = coordinator
         autoresizingMask = [.flexibleWidth]
-        clipsToBounds = false
+        clipsToBounds = true
 
         backgroundColor = isDark
             ? UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 0.97)
@@ -489,25 +638,19 @@ private final class IOSFormatToolbarView: UIView {
         line.translatesAutoresizingMaskIntoConstraints = false
         addSubview(line)
 
-        let vertical = UIStackView()
-        vertical.axis = .vertical
-        vertical.spacing = 6
-        vertical.alignment = .fill
-        vertical.distribution = .fillEqually
-        vertical.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(vertical)
+        let scroll = UIScrollView()
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.showsVerticalScrollIndicator = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scroll)
 
-        let topRow = UIStackView()
-        topRow.axis = .horizontal
-        topRow.spacing = 4
-        topRow.alignment = .center
-        topRow.distribution = .fill
-
-        let bottomRow = UIStackView()
-        bottomRow.axis = .horizontal
-        bottomRow.spacing = 4
-        bottomRow.alignment = .center
-        bottomRow.distribution = .fill
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = 2
+        row.alignment = .center
+        row.distribution = .fill
+        row.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(row)
 
         NSLayoutConstraint.activate([
             line.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -515,14 +658,17 @@ private final class IOSFormatToolbarView: UIView {
             line.topAnchor.constraint(equalTo: topAnchor),
             line.heightAnchor.constraint(equalToConstant: 0.5),
 
-            vertical.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            vertical.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            vertical.topAnchor.constraint(equalTo: line.bottomAnchor, constant: 8),
-            vertical.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-        ])
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: line.bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-        vertical.addArrangedSubview(topRow)
-        vertical.addArrangedSubview(bottomRow)
+            row.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 6),
+            row.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -6),
+            row.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            row.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            row.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+        ])
 
         let inkMute = isDark
             ? UIColor(white: 0.68, alpha: 1)
@@ -531,28 +677,41 @@ private final class IOSFormatToolbarView: UIView {
             ? UIColor(red: 0.58, green: 0.48, blue: 0.88, alpha: 1)
             : UIColor(red: 0.42, green: 0.30, blue: 0.76, alpha: 1)
 
-        addTextBtn(topRow, title: "B",  weight: .bold,    color: inkMute, sel: #selector(bold))
-        addTextBtn(topRow, title: "I",  weight: .regular, italic: true, color: inkMute, sel: #selector(italic))
-        addTextBtn(topRow, title: "U",  weight: .regular, underline: true, color: inkMute, sel: #selector(underline))
-        addTextBtn(topRow, title: "S",  weight: .regular, strike: true, color: inkMute, sel: #selector(strike))
-        addIconBtn(topRow, sf: "highlighter",                              color: inkMute, sel: #selector(highlight))
-        addIconBtn(topRow, sf: "chevron.left.forwardslash.chevron.right",  color: inkMute, sel: #selector(code))
-        let micBtn = addIconBtn(topRow, sf: "mic", color: inkMute, sel: #selector(mic))
+        addTextBtn(row, title: "B", weight: .bold,    color: inkMute, sel: #selector(bold))
+        addTextBtn(row, title: "I", weight: .regular, italic: true,     color: inkMute, sel: #selector(italic))
+        addTextBtn(row, title: "U", weight: .regular, underline: true,  color: inkMute, sel: #selector(underline))
+        addTextBtn(row, title: "S", weight: .regular, strike: true,     color: inkMute, sel: #selector(strike))
+        addSeparator(row, isDark: isDark)
+        addIconBtn(row, sf: "list.bullet",       color: inkMute,     sel: #selector(bullet))
+        addIconBtn(row, sf: "list.number",       color: inkMute,     sel: #selector(numbered))
+        addIconBtn(row, sf: "checklist",         color: inkMute,     sel: #selector(task))
+        addIconBtn(row, sf: "text.quote",        color: inkMute,     sel: #selector(quote))
+        addSeparator(row, isDark: isDark)
+        addIconBtn(row, sf: "textformat.size",   color: inkMute,     sel: #selector(heading))
+        addIconBtn(row, sf: "highlighter",       color: inkMute,     sel: #selector(highlight))
+        addIconBtn(row, sf: "chevron.left.forwardslash.chevron.right", color: inkMute, sel: #selector(code))
+        addIconBtn(row, sf: "tablecells",        color: accentColor, sel: #selector(table))
+        addSeparator(row, isDark: isDark)
+        let micBtn = addIconBtn(row, sf: "mic",  color: inkMute,     sel: #selector(mic))
         coordinator.registerMicButton(micBtn, inkColor: inkMute, activeColor: accentColor)
-
-        addIconBtn(bottomRow, sf: "list.bullet",       color: inkMute,   sel: #selector(bullet))
-        addIconBtn(bottomRow, sf: "list.number",       color: inkMute,   sel: #selector(numbered))
-        addIconBtn(bottomRow, sf: "checklist",         color: inkMute,   sel: #selector(task))
-        addIconBtn(bottomRow, sf: "text.quote",        color: inkMute,   sel: #selector(quote))
-        addIconBtn(bottomRow, sf: "textformat.size",   color: inkMute,   sel: #selector(heading))
-        addIconBtn(bottomRow, sf: "tablecells",        color: accentColor, sel: #selector(table))
-        addIconBtn(bottomRow, sf: "keyboard.chevron.compact.down", color: inkMute, sel: #selector(dismiss))
+        addIconBtn(row, sf: "keyboard.chevron.compact.down", color: inkMute, sel: #selector(dismiss))
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: 104)
+        CGSize(width: UIView.noIntrinsicMetric, height: 52)
+    }
+
+    private func addSeparator(_ stack: UIStackView, isDark: Bool) {
+        let sep = UIView()
+        sep.backgroundColor = isDark
+            ? UIColor.white.withAlphaComponent(0.12)
+            : UIColor.black.withAlphaComponent(0.10)
+        sep.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        sep.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        stack.addArrangedSubview(sep)
+        stack.setCustomSpacing(6, after: sep)
     }
 
     // MARK: - Button factory
@@ -568,11 +727,11 @@ private final class IOSFormatToolbarView: UIView {
         if strike    { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
         btn.setAttributedTitle(NSAttributedString(string: title, attributes: attrs), for: .normal)
         btn.addTarget(self, action: sel, for: .touchUpInside)
-        btn.backgroundColor = UIColor(white: 1.0, alpha: 0.04)
-        btn.layer.cornerRadius = 8
+        btn.backgroundColor = .clear
+        btn.layer.cornerRadius = 7
         btn.layer.masksToBounds = true
-        btn.widthAnchor.constraint(equalToConstant: 42).isActive = true
-        btn.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        btn.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 38).isActive = true
         stack.addArrangedSubview(btn)
     }
 
@@ -583,51 +742,184 @@ private final class IOSFormatToolbarView: UIView {
         btn.setImage(UIImage(systemName: sf, withConfiguration: cfg), for: .normal)
         btn.tintColor = color
         btn.addTarget(self, action: sel, for: .touchUpInside)
-        btn.backgroundColor = UIColor(white: 1.0, alpha: 0.04)
-        btn.layer.cornerRadius = 8
+        btn.backgroundColor = .clear
+        btn.layer.cornerRadius = 7
         btn.layer.masksToBounds = true
-        btn.widthAnchor.constraint(equalToConstant: 42).isActive = true
-        btn.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        btn.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 38).isActive = true
         stack.addArrangedSubview(btn)
         return btn
     }
 
     // MARK: - Actions
 
-    @objc private func bold()      { coordinator?.wrapSelection(opening: "**", closing: "**") }
-    @objc private func italic()    { coordinator?.wrapSelection(opening: "*",  closing: "*")  }
-    @objc private func underline() { coordinator?.wrapSelection(opening: "__", closing: "__") }
-    @objc private func strike()    { coordinator?.wrapSelection(opening: "~~", closing: "~~") }
-    @objc private func highlight() { coordinator?.wrapSelection(opening: "==", closing: "==") }
-    @objc private func bullet()    { coordinator?.toggleLinePrefix("- ")     }
+    @objc private func bold()      { coordinator?.wrapSelection(opening: "", closing: "") }
+    @objc private func italic()    { coordinator?.wrapSelection(opening: "", closing: "") }
+    @objc private func underline() { coordinator?.wrapSelection(opening: "", closing: "") }
+    @objc private func strike()    { coordinator?.wrapSelection(opening: "", closing: "") }
+    @objc private func highlight() { coordinator?.wrapSelection(opening: "", closing: "") }
+    @objc private func bullet()    { coordinator?.toggleLinePrefix("• ")     }
     @objc private func numbered()  { coordinator?.toggleLinePrefix("1. ")    }
-    @objc private func task()      { coordinator?.toggleLinePrefix("- [ ] ") }
-    @objc private func quote()     { coordinator?.toggleLinePrefix("> ")     }
-    @objc private func code()      { coordinator?.wrapSelection(opening: "`", closing: "`")   }
-    @objc private func heading()   { coordinator?.toggleLinePrefix("## ")    }
+    @objc private func task()      { coordinator?.toggleLinePrefix("☐ ")     }
+    @objc private func quote()     { coordinator?.toggleLinePrefix("❝ ")     }
+    @objc private func code()      { coordinator?.wrapSelection(opening: "", closing: "") }
+    @objc private func heading()   { coordinator?.wrapSelection(opening: "", closing: "") }
     @objc private func table()     { coordinator?.insertTable() }
     @objc private func mic()       { coordinator?.toggleVoice() }
     @objc private func dismiss()   { coordinator?.dismissKeyboard() }
 }
 
-// MARK: - iOS paragraph renderer
-
-struct IOSParagraphView: View {
-    let text: String
+struct IOSBlockContentView: View {
+    let blocks: [Block]
     let isDark: Bool
 
     private var ds: JottDS { JottDS(isDark: isDark) }
+    private var displayBlocks: [Block] {
+        let visible = blocks.filter { block in
+            switch block.type {
+            case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+                return !block.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            default:
+                return true
+            }
+        }
+        return visible.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : visible
+    }
 
     var body: some View {
-        Text(mdInlineAttributedString(
-            text,
-            baseFont: .system(size: 15),
-            baseColor: ds.ink,
-            baseSize: 15
-        ))
-        .font(.system(size: 15))
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(displayBlocks.enumerated()), id: \.element.id) { index, block in
+                blockView(block, orderedNumber: orderedNumber(at: index))
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func orderedNumber(at index: Int) -> Int? {
+        guard displayBlocks.indices.contains(index),
+              displayBlocks[index].type == .numberedItem else { return nil }
+        var number = 1
+        var i = index - 1
+        while displayBlocks.indices.contains(i), displayBlocks[i].type == .numberedItem {
+            number += 1
+            i -= 1
+        }
+        return number
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: Block, orderedNumber: Int?) -> some View {
+        switch block.type {
+        case .heading:
+            IOSSpansText(spans: block.spans, size: block.level == 1 ? 22 : 18, weight: .semibold, color: ds.ink)
+                .padding(.top, 4)
+        case .bulletItem:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•").foregroundStyle(ds.accent).frame(width: 14)
+                IOSSpansText(spans: block.spans, size: 15, weight: .regular, color: ds.ink)
+            }
+        case .numberedItem:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(orderedNumber ?? 1).")
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(ds.inkMute)
+                    .frame(width: 24, alignment: .trailing)
+                IOSSpansText(spans: block.spans, size: 15, weight: .regular, color: ds.ink)
+            }
+        case .taskItem:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: block.checked ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(block.checked ? ds.accent : ds.inkMute)
+                    .frame(width: 18)
+                IOSSpansText(spans: block.spans, size: 15, weight: .regular, color: ds.ink)
+            }
+        case .quote:
+            HStack(alignment: .top, spacing: 10) {
+                Rectangle().fill(ds.accent.opacity(0.42)).frame(width: 2)
+                IOSSpansText(spans: block.spans, size: 15, weight: .regular, color: ds.inkMute)
+            }
+        case .table:
+            IOSReadOnlyTableBlock(block: block, ds: ds)
+        case .divider:
+            Rectangle().fill(ds.hairlineMid).frame(height: 1).padding(.vertical, 4)
+        default:
+            IOSSpansText(spans: block.spans, size: 15, weight: .regular, color: ds.ink)
+        }
+    }
+}
+
+private struct IOSSpansText: View {
+    let spans: [TextSpan]
+    let size: CGFloat
+    let weight: Font.Weight
+    let color: Color
+
+    var body: some View {
+        Text(attributedText)
+            .font(.system(size: size, weight: weight))
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var attributedText: AttributedString {
+        var result = AttributedString()
+        for span in spans.isEmpty ? [TextSpan("")] : spans {
+            var value = AttributedString(span.text)
+            value.font = span.code ? .system(size: size - 1, design: .monospaced) : .system(size: size, weight: weight)
+            value.foregroundColor = color
+            if span.underline { value.underlineStyle = .single }
+            if span.strikethrough { value.strikethroughStyle = .single }
+            if span.highlight { value.backgroundColor = Color.yellow.opacity(0.35) }
+            if span.italic { value.inlinePresentationIntent = .emphasized }
+            if span.bold { value.inlinePresentationIntent = .stronglyEmphasized }
+            result += value
+        }
+        return result
+    }
+}
+
+private struct IOSReadOnlyTableBlock: View {
+    let block: Block
+    let ds: JottDS
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(block.tableHeaders.indices, id: \.self) { col in
+                        tableCell(block.tableHeaders[col], isHeader: true)
+                    }
+                }
+                ForEach(block.tableRows.indices, id: \.self) { row in
+                    GridRow {
+                        ForEach(block.tableHeaders.indices, id: \.self) { col in
+                            tableCell(cellValue(row: row, col: col), isHeader: false)
+                        }
+                    }
+                }
+            }
+            .background(ds.surfaceAlt.opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ds.hairlineMid, lineWidth: 0.8))
+        }
+    }
+
+    private func tableCell(_ text: String, isHeader: Bool) -> some View {
+        Text(text.isEmpty ? " " : text)
+            .font(.jottBody(14, weight: isHeader ? .semibold : .regular))
+            .foregroundStyle(isHeader ? ds.ink : ds.inkMute)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 116, minHeight: 38, alignment: .leading)
+            .background(isHeader ? ds.accentSoft : ds.surface)
+            .overlay(Rectangle().stroke(ds.hairlineMid, lineWidth: 0.5))
+    }
+
+    private func cellValue(row: Int, col: Int) -> String {
+        guard block.tableRows.indices.contains(row),
+              block.tableRows[row].indices.contains(col) else { return "" }
+        return block.tableRows[row][col]
     }
 }
 

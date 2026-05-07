@@ -29,7 +29,7 @@ private func parseRichBlocks(_ text: String) -> [RichBlock] {
     for line in lines {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-        // Image markdown on its own line: ![alt](path)
+        // Image token on its own line.
         if let regex = imagePattern,
            let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
            let altRange  = Range(m.range(at: 1), in: line),
@@ -290,9 +290,8 @@ struct NoteRichContentView: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let t):
-                    MarkdownRichView(text: t, isDarkMode: isDarkMode, onDoubleTap: onTap) { paragraphText in
-                        InlineLinkedTextBlock(text: paragraphText, isDarkMode: isDarkMode)
-                    }
+                    InlineLinkedTextBlock(text: t, isDarkMode: isDarkMode)
+                        .onTapGesture(count: 2) { onTap() }
 
                 case .image(let path, let alt):
                     AttachmentImageView(path: path, alt: alt)
@@ -324,15 +323,28 @@ struct NoteBlockRichContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(displayBlocks) { block in
-                blockView(block)
+            ForEach(Array(displayBlocks.enumerated()), id: \.element.id) { index, block in
+                blockView(block, orderedNumber: orderedNumber(at: index))
                     .onTapGesture(count: 2) { onTap() }
             }
         }
     }
 
+    private func orderedNumber(at index: Int) -> Int? {
+        guard displayBlocks.indices.contains(index),
+              displayBlocks[index].type == .numberedItem else { return nil }
+
+        var number = 1
+        var i = index - 1
+        while displayBlocks.indices.contains(i), displayBlocks[i].type == .numberedItem {
+            number += 1
+            i -= 1
+        }
+        return number
+    }
+
     @ViewBuilder
-    private func blockView(_ block: Block) -> some View {
+    private func blockView(_ block: Block, orderedNumber: Int? = nil) -> some View {
         switch block.type {
         case .paragraph:
             BlockSpansText(spans: block.spans, font: .system(size: 15), color: ink)
@@ -359,7 +371,7 @@ struct NoteBlockRichContentView: View {
 
         case .numberedItem:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("1.")
+                Text("\(orderedNumber ?? 1).")
                     .font(.system(size: 14, design: .monospaced))
                     .foregroundColor(inkMute)
                     .frame(width: 22, alignment: .trailing)
@@ -415,6 +427,10 @@ struct NoteBlockRichContentView: View {
             if let imageURL = block.imageURL, !imageURL.isEmpty {
                 AttachmentImageView(path: imageURL, alt: block.imageAlt)
             }
+
+        case .toggle:
+            BlockSpansText(spans: block.spans, font: .system(size: 15), color: ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -636,12 +652,8 @@ private struct InlineLinkedTextBlock: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                let baseColor: Color = isDarkMode ? Color(white: 0.92) : Color("jott-input-text")
-                let codeBG: Color = isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
-                Text(mdInlineAttributedString(value,
-                                              baseFont: .system(size: 15),
-                                              baseColor: baseColor,
-                                              codeBackground: codeBG))
+                Text(value)
+                    .foregroundColor(isDarkMode ? Color(white: 0.92) : Color("jott-input-text"))
                     .font(.system(size: 15))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -724,8 +736,8 @@ private extension AnyTransition {
 struct DetailView: View {
     @ObservedObject var viewModel: OverlayViewModel
     @State private var showFormat = false
-    @State private var autoSaveTimer: Timer?
     @State private var showSubnoteInput = false
+    @State private var autoSaveTimer: Timer?
 
     private var detailContentID: String {
         if let note = viewModel.selectedNote { return "note-\(note.id.uuidString)" }
@@ -749,7 +761,7 @@ struct DetailView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                DetailHeader(viewModel: viewModel, showSubnoteInput: $showSubnoteInput)
+                DetailHeader(viewModel: viewModel)
 
                 Divider().opacity(0.1)
 
@@ -769,26 +781,6 @@ struct DetailView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 10)
                     .transition(.detailContentSwap)
-                    .overlay(alignment: .bottomTrailing) {
-                        if let note = viewModel.selectedNote, note.parentId == nil {
-                            let subnoteCount = viewModel.subnotes(of: note.id).count
-                            if subnoteCount > 0 {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "square.stack")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92))
-                                    Text("\(subnoteCount)")
-                                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                                        .foregroundColor(Color(red: 0.58, green: 0.50, blue: 0.92))
-                                }
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                                .background(Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.12),
-                                           in: Capsule())
-                                .padding(10)
-                            }
-                        }
-                    }
                 }
 
                 if let note = viewModel.selectedNote, !viewModel.isEditingNote,
@@ -813,6 +805,29 @@ struct DetailView: View {
                 if let note = viewModel.selectedNote, !viewModel.isEditingNote {
                     NoteFooter(note: note, isDarkMode: viewModel.isDarkMode)
                         .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let note = viewModel.selectedNote, !viewModel.isEditingNote,
+                   note.parentId == nil, !showSubnoteInput {
+                    let accent = Color(red: 0.58, green: 0.50, blue: 0.92)
+                    Button { withAnimation(JottMotion.content) { showSubnoteInput = true } } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "plus.circle")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("New Subnote")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .foregroundColor(accent)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(accent.opacity(0.22), lineWidth: 0.8))
+                    }
+                    .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.94, pressedOpacity: 0.80))
+                    .padding(.bottom, 16)
+                    .transition(.opacity.animation(JottMotion.content))
                 }
             }
         }
@@ -997,7 +1012,6 @@ private struct NoteEditFormatBar: View {
 
 private struct DetailHeader: View {
     @ObservedObject var viewModel: OverlayViewModel
-    @Binding var showSubnoteInput: Bool
     @State private var showInfo = false
 
     var accentGreen: Color {
@@ -1069,25 +1083,6 @@ private struct DetailHeader: View {
                     }
                     .keyboardShortcut("o", modifiers: .command)
 
-                    // Add subnote — root notes only
-                    if note.parentId == nil {
-                        Button(action: {
-                            withAnimation(JottMotion.content) { showSubnoteInput.toggle() }
-                        }) {
-                            Image(systemName: "arrow.turn.down.right")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(showSubnoteInput
-                                    ? Color(red: 0.58, green: 0.50, blue: 0.92)
-                                    : Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.55))
-                                .frame(width: 26, height: 26)
-                                .background(showSubnoteInput
-                                    ? Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.18)
-                                    : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.88, pressedOpacity: 0.75))
-                        .help("Add subnote")
-                    }
 
                     Button(action: { showInfo.toggle() }) {
                         Image(systemName: "info.circle")
@@ -1382,7 +1377,7 @@ struct NoteDetailContent: View {
 
     private func isTitleCandidate(_ block: Block) -> Bool {
         switch block.type {
-        case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+        case .paragraph, .heading:
             return !block.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         default:
             return false
@@ -1607,7 +1602,6 @@ private struct NoteInlineEditor: NSViewRepresentable {
             }
 
             tv.textStorage?.setAttributedString(attrStr)
-            tv.textStorage?.applyMarkdownHighlighting(baseFont: font, baseColor: textColor, isDark: isDark, ghostStart: coord.ghostStart)
             let clampedLoc = min(savedSel.location, text.utf16.count)
             tv.setSelectedRange(NSRange(location: clampedLoc, length: 0))
         }
@@ -1644,14 +1638,6 @@ private struct NoteInlineEditor: NSViewRepresentable {
             let newText = tv.string   // ghost already stripped by shouldChangeTextIn
             parent.text = newText
             parent.onTextChange?(newText)
-            // Re-apply syntax highlighting
-            let font = tv.font ?? NSFont.systemFont(ofSize: 15)
-            let baseColor: NSColor = parent.isDark
-                ? .white.withAlphaComponent(0.90)
-                : .black.withAlphaComponent(0.85)
-            let sel = tv.selectedRange()
-            tv.textStorage?.applyMarkdownHighlighting(baseFont: font, baseColor: baseColor, isDark: parent.isDark, ghostStart: ghostStart)
-            tv.setSelectedRange(sel)
         }
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
@@ -2048,10 +2034,8 @@ final class DetailNoteTextView: NSTextView {
            let image = images.first {
             if let tiff = image.tiffRepresentation,
                let bitmap = NSBitmapImageRep(data: tiff),
-               let pngData = bitmap.representation(using: .png, properties: [:]),
-               let path = NoteStore.shared.saveAttachment(data: pngData, filename: "clipboard-\(UUID().uuidString).png") {
-                let mdText = "\n![image](\(path))\n"
-                insertText(mdText, replacementRange: selectedRange())
+               let pngData = bitmap.representation(using: .png, properties: [:]) {
+                _ = NoteStore.shared.saveAttachment(data: pngData, filename: "clipboard-\(UUID().uuidString).png")
                 return true
             }
         }

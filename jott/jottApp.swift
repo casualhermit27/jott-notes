@@ -11,12 +11,17 @@ import Combine
 
 extension Notification.Name {
     static let jottThemeDidChange = Notification.Name("jottThemeDidChange")
+    static let jottShowPaywall    = Notification.Name("jottShowPaywall")
 }
 
 @main
 struct jottApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var menuBarStore = MenuBarStore()
+
+    init() {
+        PurchaseManager.shared.configure(apiKey: "test_xmAJDfyOTyKQcXPoxyezuXAidIO")
+    }
 
     var body: some Scene {
         MenuBarExtra("jott", image: "JottMenuBar") {
@@ -263,6 +268,7 @@ extension Bundle {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: OverlayWindowController?
     var libraryWindowController: LibraryWindowController?
+    var focusPillController: FocusNotePillController?
     private var syncTimer: Timer?
 
     private func ensureWindowController() -> OverlayWindowController {
@@ -280,6 +286,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let controller = LibraryWindowController(viewModel: ensureWindowController().viewModel)
         libraryWindowController = controller
+        return controller
+    }
+
+    private func ensureFocusPillController() -> FocusNotePillController {
+        if let controller = focusPillController { return controller }
+        let controller = FocusNotePillController(viewModel: ensureWindowController().viewModel)
+        focusPillController = controller
         return controller
     }
 
@@ -318,6 +331,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateManager.shared.start()
 
         ensureWindowController().preload()
+        _ = ensureFocusPillController()
 
         // Start clipboard monitor early
         _ = ClipboardMonitor.shared

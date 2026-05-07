@@ -122,7 +122,7 @@ final class NoteStore: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.title = "Choose Notes Folder"
         panel.prompt = "Choose"
-        panel.message = "Jott will save your notes as Markdown files in this folder."
+        panel.message = "Jott will save your notes in this folder."
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         // Save security-scoped bookmark

@@ -1,6 +1,7 @@
 import SwiftUI
 
-// MARK: - Block note editor (segmented: text segments interleaved with inline tables)
+// IOSBlockNoteEditor: wraps IOSBlockTextEditor (direct block<->prefix, no markdown)
+// and stacks inline table editors below the text area.
 
 struct IOSBlockNoteEditor: View {
     @Binding var blocks: [Block]
@@ -10,139 +11,59 @@ struct IOSBlockNoteEditor: View {
 
     private var ds: JottDS { JottDS(isDark: isDark) }
 
-    // Each segment = one UITextView + the optional table that follows it
-    @State private var segments: [TextSegment] = []
-    @State private var scrollToID: UUID? = nil
-
-    private struct TextSegment: Identifiable {
-        var id: UUID = UUID()
-        var text: String
-        var tableBlock: Block?
-    }
-
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    ForEach(segments.indices, id: \.self) { i in
-                        IOSMarkdownEditor(
-                            text: textBinding(i),
-                            isDark: isDark,
-                            autoFocus: autoFocus && i == 0,
-                            onTextChange: { _ in syncBlocks() },
-                            onInsertTable: { rows, cols in
-                                insertTable(atSegment: i, rows: rows, cols: cols)
-                            }
-                        )
-                        .frame(minHeight: i == 0 ? 220 : 80)
+        VStack(alignment: .leading, spacing: 0) {
+            IOSBlockTextEditor(
+                blocks: textBlocksBinding,
+                isDark: isDark,
+                autoFocus: autoFocus,
+                onBlocksChange: { _ in onBlocksChange?(blocks) },
+                onInsertTable: { rows, cols in insertTable(rows: rows, cols: cols) }
+            )
 
-                        if let table = segments[i].tableBlock {
-                            IOSInlineTableEditor(
-                                block: tableBinding(id: table.id),
-                                ds: ds,
-                                onDelete: { deleteTable(id: table.id) }
-                            )
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .id(table.id)
-                        }
-                    }
-                }
-                .padding(.bottom, 24)
-            }
-            .onChange(of: scrollToID) {
-                guard let id = scrollToID else { return }
-                withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .bottom) }
-                scrollToID = nil
+            ForEach(tableIndices, id: \.self) { i in
+                IOSInlineTableEditor(
+                    block: $blocks[i],
+                    ds: ds,
+                    onDelete: { deleteTable(id: blocks[i].id) }
+                )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
         }
-        .onAppear { loadSegments() }
     }
 
-    // MARK: - Segment loading
+    // MARK: - Helpers
 
-    private func loadSegments() {
-        var segs: [TextSegment] = []
-        var textBlocks: [Block] = []
-        for block in blocks {
-            if block.type == .table {
-                segs.append(TextSegment(text: MarkdownConverter.export(textBlocks), tableBlock: block))
-                textBlocks = []
-            } else {
-                textBlocks.append(block)
-            }
-        }
-        segs.append(TextSegment(text: MarkdownConverter.export(textBlocks), tableBlock: nil))
-        segments = segs
+    private var tableIndices: [Int] {
+        blocks.indices.filter { blocks[$0].type == .table }
     }
 
-    // MARK: - Sync to blocks binding
-
-    private func syncBlocks() {
-        var result: [Block] = []
-        for seg in segments {
-            result.append(contentsOf: MarkdownConverter.parse(seg.text))
-            if let t = seg.tableBlock { result.append(t) }
-        }
-        blocks = result
-        onBlocksChange?(result)
-    }
-
-    // MARK: - Bindings
-
-    private func textBinding(_ i: Int) -> Binding<String> {
+    private var textBlocksBinding: Binding<[Block]> {
         Binding(
-            get: { i < segments.count ? segments[i].text : "" },
-            set: { if i < segments.count { segments[i].text = $0 } }
-        )
-    }
-
-    private func tableBinding(id: UUID) -> Binding<Block> {
-        Binding(
-            get: {
-                segments.first(where: { $0.tableBlock?.id == id })?.tableBlock
-                    ?? Block(type: .table, tableHeaders: [], tableRows: [])
-            },
-            set: { newBlock in
-                guard let i = segments.firstIndex(where: { $0.tableBlock?.id == id }) else { return }
-                segments[i].tableBlock = newBlock
-                syncBlocks()
+            get: { blocks.filter { $0.type != .table } },
+            set: { newText in
+                let tables = blocks.filter { $0.type == .table }
+                blocks = newText + tables
+                onBlocksChange?(blocks)
             }
         )
     }
 
-    // MARK: - Table insert / delete
-
-    private func insertTable(atSegment i: Int, rows: Int, cols: Int) {
-        guard i < segments.count else { return }
-        let newTable = Self.makeTableBlock(rows: rows, columns: cols)
-        // The current text segment becomes text-before + new table
-        // A fresh empty text segment follows after the table
-        segments[i].tableBlock = newTable
-        let newSeg = TextSegment(text: "", tableBlock: nil)
-        segments.insert(newSeg, at: i + 1)
-        syncBlocks()
-        scrollToID = newTable.id
-    }
-
-    private func deleteTable(id: UUID) {
-        guard let i = segments.firstIndex(where: { $0.tableBlock?.id == id }) else { return }
-        let nextText = (i + 1 < segments.count) ? segments[i + 1].text : ""
-        let nextTable = (i + 1 < segments.count) ? segments[i + 1].tableBlock : nil
-        // Merge the following text segment into this one, removing the table
-        segments[i].text += nextText.isEmpty ? "" : (segments[i].text.isEmpty ? nextText : "\n\n" + nextText)
-        segments[i].tableBlock = nextTable
-        if i + 1 < segments.count { segments.remove(at: i + 1) }
-        syncBlocks()
-    }
-
-    static func makeTableBlock(rows: Int = 2, columns: Int = 2) -> Block {
-        let c = max(1, min(columns, 8)), r = max(1, min(rows, 12))
-        return Block(
+    private func insertTable(rows: Int, cols: Int) {
+        let c = max(1, min(cols, 8)), r = max(1, min(rows, 12))
+        let newTable = Block(
             type: .table,
             tableHeaders: (1...c).map { "Column \($0)" },
             tableRows: Array(repeating: Array(repeating: "", count: c), count: r)
         )
+        blocks.append(newTable)
+        onBlocksChange?(blocks)
+    }
+
+    private func deleteTable(id: UUID) {
+        blocks.removeAll { $0.id == id }
+        onBlocksChange?(blocks)
     }
 }
 
@@ -158,7 +79,6 @@ private struct IOSInlineTableEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header row: icon + spacer + action buttons
             HStack(spacing: 6) {
                 Image(systemName: "tablecells")
                     .font(.system(size: 12, weight: .semibold))

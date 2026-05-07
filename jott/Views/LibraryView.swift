@@ -155,19 +155,7 @@ struct LibraryView: View {
                     availableTags: availableTags,
                     destructiveActionLabel: isRecentlyDeleted ? "Delete Forever" : "Delete",
                     onDismissDetail: { clearSelection() },
-                    onDeleteSelected: { showDeleteConfirm = true },
-                    onNewNote: {
-                        let newNote = Note(blocks: [Block(type: .paragraph, spans: [TextSpan("")])],
-                                          folderId: activeFolderID)
-                        NoteStore.shared.upsertNote(newNote)
-                        viewModel.selectedNote = NoteStore.shared.note(for: newNote.id) ?? newNote
-                        viewModel.startEditingNote(viewModel.selectedNote ?? newNote)
-                        withAnimation(JottMotion.content) {
-                            selectedItem = .note(newNote.id)
-                            selectedNoteIDs = [newNote.id]
-                            selectionAnchorNoteID = newNote.id
-                        }
-                    }
+                    onDeleteSelected: { showDeleteConfirm = true }
                 )
 
                 Divider().opacity(isDarkMode ? 0.16 : 0.10)
@@ -196,10 +184,39 @@ struct LibraryView: View {
                     Divider().opacity(isDarkMode ? 0.10 : 0.07)
                 }
 
-                ZStack(alignment: .trailing) {
+                ZStack(alignment: .bottomTrailing) {
                     primaryPane
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .opacity(isDetailExpanded ? 0 : 1)
+
+                    // Floating new note button
+                    if selectedNote == nil && !isRecentlyDeleted {
+                        Button {
+                            let newNote = Note(blocks: [Block(type: .paragraph, spans: [TextSpan("")])],
+                                              folderId: activeFolderID)
+                            NoteStore.shared.upsertNote(newNote)
+                            viewModel.selectedNote = NoteStore.shared.note(for: newNote.id) ?? newNote
+                            viewModel.startEditingNote(viewModel.selectedNote ?? newNote)
+                            withAnimation(JottMotion.content) {
+                                selectedItem = .note(newNote.id)
+                                selectedNoteIDs = [newNote.id]
+                                selectionAnchorNoteID = newNote.id
+                            }
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 46, height: 46)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .fill(JottDS(isDark: isDarkMode).accent)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 14)
+                        .padding(.bottom, 14)
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    }
 
                     if let note = selectedNote {
                         LibraryNoteDetailPanel(
@@ -336,13 +353,18 @@ struct LibraryView: View {
     private var libraryGridView: some View {
         let ds = JottDS(isDark: isDarkMode)
         let notes = sortedVisibleNotes
+        let pinnedNotes = notes.filter { $0.isPinned }
+        let regularNotes = notes.filter { !$0.isPinned }
 
         return GeometryReader { proxy in
             let spacing: CGFloat = 16
             let targetWidth: CGFloat = 260
             let usable = max(proxy.size.width, targetWidth)
             let cols = max(1, Int((usable + spacing) / (targetWidth + spacing)))
-            let columns = Array(repeating: GridItem(.flexible(), spacing: spacing, alignment: .top), count: cols)
+            // Pinned notes: max 2 columns so each card is noticeably wider
+            let pinnedCols = min(2, cols)
+            let columns       = Array(repeating: GridItem(.flexible(), spacing: spacing, alignment: .top), count: cols)
+            let pinnedColumns = Array(repeating: GridItem(.flexible(), spacing: spacing, alignment: .top), count: pinnedCols)
 
             ScrollView(showsIndicators: false) {
                 if notes.isEmpty {
@@ -358,23 +380,49 @@ struct LibraryView: View {
                     )
                     .frame(height: max(proxy.size.height - 32, 200))
                 } else {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
-                        ForEach(notes, id: \.id) { note in
-                            LibraryMinimalNoteCard(
-                                note: note,
-                                estimatedHeight: gridCardEstimatedHeight(for: note),
-                                isSelected: selectedNoteIDs.contains(note.id),
-                                isDarkMode: isDarkMode,
-                                subnoteCount: viewModel.subnoteCount(of: note.id),
-                                animationNamespace: gridCardNamespace,
-                                isDragSelecting: $isDragSelectingNotes,
-                                onActivate: { modifiers in
-                                    select(note: note, modifiers: modifiers)
-                                },
-                                onDragSelect: { dragSelect(note: note) },
-                                viewModel: viewModel
-                            )
-                            .contextMenu { noteContextMenu(for: note) }
+                    VStack(alignment: .leading, spacing: spacing) {
+                        // ── Pinned section (wider, taller cards) ──
+                        if !pinnedNotes.isEmpty {
+                            LazyVGrid(columns: pinnedColumns, alignment: .leading, spacing: spacing) {
+                                ForEach(pinnedNotes, id: \.id) { note in
+                                    LibraryMinimalNoteCard(
+                                        note: note,
+                                        estimatedHeight: pinnedCardEstimatedHeight(for: note),
+                                        isSelected: selectedNoteIDs.contains(note.id),
+                                        isDarkMode: isDarkMode,
+                                        subnoteCount: viewModel.subnoteCount(of: note.id),
+                                        animationNamespace: gridCardNamespace,
+                                        isDragSelecting: $isDragSelectingNotes,
+                                        onActivate: { modifiers in select(note: note, modifiers: modifiers) },
+                                        onDragSelect: { dragSelect(note: note) },
+                                        viewModel: viewModel
+                                    )
+                                    .contextMenu { noteContextMenu(for: note) }
+                                }
+                            }
+                            if !regularNotes.isEmpty {
+                                Rectangle().fill(ds.hairline).frame(height: 1)
+                            }
+                        }
+                        // ── Regular notes ──
+                        if !regularNotes.isEmpty {
+                            LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
+                                ForEach(regularNotes, id: \.id) { note in
+                                    LibraryMinimalNoteCard(
+                                        note: note,
+                                        estimatedHeight: gridCardEstimatedHeight(for: note),
+                                        isSelected: selectedNoteIDs.contains(note.id),
+                                        isDarkMode: isDarkMode,
+                                        subnoteCount: viewModel.subnoteCount(of: note.id),
+                                        animationNamespace: gridCardNamespace,
+                                        isDragSelecting: $isDragSelectingNotes,
+                                        onActivate: { modifiers in select(note: note, modifiers: modifiers) },
+                                        onDragSelect: { dragSelect(note: note) },
+                                        viewModel: viewModel
+                                    )
+                                    .contextMenu { noteContextMenu(for: note) }
+                                }
+                            }
                         }
                     }
                     .padding(.bottom, 8)
@@ -438,6 +486,12 @@ struct LibraryView: View {
             NoteStore.shared.togglePin(note.id)
         }
 
+        Button {
+            viewModel.focusedNote = note
+        } label: {
+            Label("Pin to Focus", systemImage: "pin.fill")
+        }
+
         Divider()
 
         Button(role: .destructive) {
@@ -453,13 +507,29 @@ struct LibraryView: View {
         Color.clear.frame(width: 0, height: 0)
     }
 
-    private func gridCardEstimatedHeight(for note: Note) -> CGFloat {
-        let nonEmptyLines = note.text
-            .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private func pinnedCardEstimatedHeight(for note: Note) -> CGFloat {
+        let nonEmptyLines = note.blocks
+            .map { $0.plainText.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let characterCount = nonEmptyLines.joined(separator: " ").count
-        let hasImage = note.text.contains("![")
+        let hasImage = note.blocks.contains { $0.type == .image && !($0.imageURL ?? "").isEmpty }
+        let subnoteCount = viewModel.subnoteCount(of: note.id)
+        let densityScore = min(nonEmptyLines.count, 5) + min(characterCount / 80, 3) + (hasImage ? 2 : 0) + min(subnoteCount, 2)
+
+        switch densityScore {
+        case ...2: return 340
+        case 3...4: return 380
+        case 5...6: return 420
+        default: return 460
+        }
+    }
+
+    private func gridCardEstimatedHeight(for note: Note) -> CGFloat {
+        let nonEmptyLines = note.blocks
+            .map { $0.plainText.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let characterCount = nonEmptyLines.joined(separator: " ").count
+        let hasImage = note.blocks.contains { $0.type == .image && !($0.imageURL ?? "").isEmpty }
         let subnoteCount = viewModel.subnoteCount(of: note.id)
         let densityScore = min(nonEmptyLines.count, 5) + min(characterCount / 80, 3) + (hasImage ? 2 : 0) + min(subnoteCount, 2)
 
@@ -590,20 +660,6 @@ struct LibraryView: View {
         }
     }
 
-    private func stripLibraryMarkup(from raw: String) -> String {
-        raw
-            .replacingOccurrences(of: #"\[\[([^\]]+)\]\]"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"!\[[^\]]*\]\(([^)]+)\)"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func isImageOnlyLine(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let regex = try? NSRegularExpression(pattern: #"^!\[[^\]]*\]\(([^)]+)\)$"#) else { return false }
-        return regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil
-    }
-
 }
 
 private struct LibraryMinimalNoteCard: View {
@@ -677,18 +733,13 @@ private struct LibraryMinimalNoteCard: View {
            !imageURL.isEmpty {
             return imageURL
         }
-        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^)]+)\)"#) else { return nil }
-        let source = note.text
-        guard let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
-              let pathRange = Range(match.range(at: 1), in: source) else { return nil }
-        return String(source[pathRange])
+        return nil
     }
 
     private func textTitle(for block: Block) -> String? {
         switch block.type {
         case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
-            let value = stripMarkup(from: block.plainText).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !isTableMarkdownLine(value) else { return nil }
+            let value = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? nil : value
         default:
             return nil
@@ -698,8 +749,7 @@ private struct LibraryMinimalNoteCard: View {
     private func previewLines(for block: Block) -> [String] {
         switch block.type {
         case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
-            let value = stripMarkup(from: block.plainText).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !isTableMarkdownLine(value) else { return [] }
+            let value = block.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? [] : [value]
         case .table:
             let columns = max(block.tableHeaders.count, block.tableRows.first?.count ?? 0)
@@ -709,11 +759,6 @@ private struct LibraryMinimalNoteCard: View {
         default:
             return []
         }
-    }
-
-    private func isTableMarkdownLine(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("|") && trimmed.hasSuffix("|")
     }
 
     @ViewBuilder
@@ -791,7 +836,7 @@ private struct LibraryMinimalNoteCard: View {
 
                 Spacer().frame(height: 10)
 
-                Text(stripMarkup(from: title))
+                Text(title)
                     .font(.system(size: 14.5, weight: .medium))
                     .foregroundColor(ds.ink)
                     .lineLimit(3)
@@ -914,27 +959,6 @@ private struct LibraryMinimalNoteCard: View {
         .padding(.bottom, subnoteCount > 0 ? 10 : 2)
     }
 
-    private func stripMarkup(from raw: String) -> String {
-        raw
-            .replacingOccurrences(of: #"\[\[([^\]]+)\]\]"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"!\[[^\]]*\]\(([^)]+)\)"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"^#{1,6} "#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\*\*\*(.+?)\*\*\*"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"\*(.+?)\*"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"~~(.+?)~~"#, with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: #"^[-*+] "#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"^> "#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces)
-    }
-
-    private func isImageOnlyLine(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let regex = try? NSRegularExpression(pattern: #"^!\[[^\]]*\]\(([^)]+)\)$"#) else { return false }
-        return regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil
-    }
 }
 
 // MARK: - Library Grid Expanded Card
@@ -963,6 +987,7 @@ private struct LibraryNoteDetailPanel: View {
 
     var body: some View {
         let ds = JottDS(isDark: isDark)
+        let hasSubnotes = !viewModel.subnotes(of: note.id).isEmpty
 
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
@@ -1070,43 +1095,55 @@ private struct LibraryNoteDetailPanel: View {
                     VStack(alignment: .leading, spacing: 0) {
                         NoteDetailContent(note: note, viewModel: viewModel)
 
-                        // Inline subnote input (shown after tapping squish)
+                        // Inline subnote input (shown after tapping the button)
                         if showingSubnoteInput {
                             subnoteInputRow
                                 .padding(.top, 12)
                         }
 
-                        Spacer().frame(height: 72) // room for FAB
+                        Spacer().frame(height: viewModel.isEditingNote ? 8 : 72)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 18)
                     .padding(.bottom, 16)
                 }
+
+                // ── Format toolbar (editing only) ──
+                if viewModel.isEditingNote {
+                    Rectangle().fill(ds.hairline).frame(height: 1)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LibraryEditFormatBar(blocks: Binding(
+                            get: { viewModel.editingNoteBlocks },
+                            set: { viewModel.editingNoteBlocks = $0 }
+                        ))
+                        .padding(.horizontal, 14)
+                    }
+                    .frame(height: 44)
+                }
             }
 
-            // ── Add subnote button (bottom-right, quiet) ──
+            // ── Subnote button ──
+            let subnoteButtonVisible = !showingSubnoteInput && !viewModel.isEditingNote
             Button {
                 withAnimation(JottMotion.content) { showingSubnoteInput = true }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Add subnote")
-                        .font(.system(size: 12, weight: .medium))
+                    Image(systemName: "plus.circle").font(.system(size: 12, weight: .semibold))
+                    Text("New Subnote").font(.system(size: 12, weight: .medium))
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(squishColor)
-                )
+                .foregroundColor(squishColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(squishColor.opacity(0.10),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(squishColor.opacity(0.22), lineWidth: 0.8))
             }
-            .buttonStyle(SquishButtonStyle())
-            .padding(.trailing, 18)
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
             .padding(.bottom, 18)
-            .opacity((showingSubnoteInput || viewModel.isEditingNote) ? 0 : 1)
-            .scaleEffect((showingSubnoteInput || viewModel.isEditingNote) ? 0.88 : 1)
+            .opacity(subnoteButtonVisible ? 1 : 0)
+            .scaleEffect(subnoteButtonVisible ? 1 : 0.88)
             .animation(JottMotion.micro, value: showingSubnoteInput)
             .animation(JottMotion.micro, value: viewModel.isEditingNote)
         }
@@ -1277,6 +1314,8 @@ private struct LibraryInPlaceDetailCard: View {
     }
 
     var body: some View {
+        let hasSubnotes = !viewModel.subnotes(of: note.id).isEmpty
+
         ZStack(alignment: .bottomTrailing) {
             VStack(alignment: .leading, spacing: 0) {
                 // Header
@@ -1371,20 +1410,24 @@ private struct LibraryInPlaceDetailCard: View {
                 }
             }
 
+            // Subnote button
             Button {
                 withAnimation(JottMotion.content) { showingSubnoteInput = true }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
-                    Text("Add subnote").font(.system(size: 12, weight: .medium))
+                    Image(systemName: "plus.circle").font(.system(size: 12, weight: .semibold))
+                    Text("New Subnote").font(.system(size: 12, weight: .medium))
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(squishColor))
+                .foregroundColor(squishColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(squishColor.opacity(0.10),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(squishColor.opacity(0.22), lineWidth: 0.8))
             }
-            .buttonStyle(SquishButtonStyle())
-            .padding(.trailing, 16)
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
             .padding(.bottom, 16)
             .opacity(showingSubnoteInput ? 0 : 1)
             .animation(JottMotion.micro, value: showingSubnoteInput)
@@ -2417,23 +2460,6 @@ private struct LibraryTopBar: View {
 
             if !isSearching {
                 Button {
-                    onNewNote?()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(ds.accent)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(ds.accentSoft)
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("New Note")
-            }
-
-            if !isSearching {
-                Button {
                     activeFilter = activeFilter == .recentlyDeleted ? .none : .recentlyDeleted
                 } label: {
                     Image(systemName: "trash")
@@ -2748,7 +2774,6 @@ struct LibraryNoteInspector: View {
     let editRequestToken: UUID
     let onSelectNote: (Note) -> Void
     @State private var isEditing = false
-    @State private var editingText = ""
     @State private var editingBlocks: [Block] = []
     @FocusState private var isEditorFocused: Bool
 
@@ -2800,16 +2825,14 @@ struct LibraryNoteInspector: View {
             isEditing = true
             DispatchQueue.main.async { isEditorFocused = true }
         }
-        .onChange(of: note.text) { _, newValue in
+        .onChange(of: note.modifiedAt) { _, _ in
             if !isEditing {
-                editingText = newValue
                 editingBlocks = note.blocks
             }
         }
     }
 
     private func resetEditingState() {
-        editingText = note.text
         let blocks = jottDisplayBlocks(from: note.blocks)
         editingBlocks = blocks.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : blocks
     }
@@ -2853,7 +2876,6 @@ struct LibraryNoteInspector: View {
             Button(isEditing ? "Save" : "Edit") {
                 if isEditing {
                     if let updated = viewModel.updateNote(note, blocks: editingBlocks) {
-                        editingText = updated.text
                         editingBlocks = updated.blocks
                         isEditing = false
                     }
@@ -2943,94 +2965,29 @@ struct LibraryNoteInspector: View {
 struct LibraryBlockEditor: View {
     @Binding var blocks: [Block]
     let isDarkMode: Bool
-    @State private var isToolbarVisible = true
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Content blocks with bottom padding so the pill doesn't overlap
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(blocks.indices, id: \.self) { index in
-                    switch blocks[index].type {
-                    case .table:
-                        LibraryStoredTableEditor(block: $blocks[index])
-                    default:
-                        LibraryAIInlineEditor(
-                            text: textBinding(for: index),
-                            suggestion: nil,
-                            isDark: isDarkMode,
-                            onTextChange: nil,
-                            onSuggestionAccepted: {},
-                            onSuggestionDismissed: {}
-                        )
-                        .frame(minHeight: minHeight(for: blocks[index]))
-                    }
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            LibraryNoteTextEditor(blocks: textBlocksBinding, isDark: isDarkMode)
+                .frame(minHeight: 180)
+            ForEach(tableIndices, id: \.self) { i in
+                LibraryStoredTableEditor(block: $blocks[i])
+                    .padding(.top, 8)
             }
-            .padding(.bottom, 52)
-
-            // Floating combined pill at the bottom
-            HStack(spacing: 4) {
-                if isToolbarVisible {
-                    HStack(spacing: 2) {
-                        LibraryEditFormatBar(blocks: $blocks)
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
-                    .animation(.spring(response: 0.28, dampingFraction: 0.80), value: isToolbarVisible)
-
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.18))
-                        .frame(width: 1, height: 13)
-                        .padding(.horizontal, 3)
-                }
-
-                Button(action: {}) {
-                    Image(systemName: "mic")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.18))
-                    .frame(width: 1, height: 13)
-                    .padding(.horizontal, 3)
-
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.80)) {
-                        isToolbarVisible.toggle()
-                    }
-                } label: {
-                    Image(systemName: isToolbarVisible ? "chevron.left" : "textformat")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary.opacity(0.72))
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help(isToolbarVisible ? "Hide formatting" : "Show formatting")
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.jottOverlaySurface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.jottBorder.opacity(0.7), lineWidth: 1))
-            .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 3)
         }
     }
 
-    private func minHeight(for block: Block) -> CGFloat {
-        max(44, CGFloat(max(1, block.markdown.components(separatedBy: "\n").count)) * 24)
+    private var tableIndices: [Int] {
+        blocks.indices.filter { blocks[$0].type == .table }
     }
 
-    private func textBinding(for index: Int) -> Binding<String> {
+    private var textBlocksBinding: Binding<[Block]> {
         Binding(
-            get: {
-                guard blocks.indices.contains(index) else { return "" }
-                return blocks[index].markdown
-            },
-            set: { newValue in
-                guard blocks.indices.contains(index) else { return }
-                let parsed = MarkdownConverter.parse(newValue)
-                blocks[index] = parsed.first ?? Block(type: .paragraph, spans: [TextSpan(newValue)])
+            get: { blocks.filter { $0.type != .table } },
+            set: { newText in
+                var merged = newText
+                merged.append(contentsOf: blocks.filter { $0.type == .table })
+                blocks = merged
             }
         )
     }
@@ -3080,13 +3037,30 @@ private struct LibraryEditFormatBar: View {
     }
 
     private func apply(_ command: JottTextFormatCommand) {
-        if JottTextFormatting.apply(command) { return }
+        if let tv = JottTextFormattingRegistry.activeTextView as? JottLibraryTextView, tv.window != nil {
+            tv.window?.makeFirstResponder(tv)
+            if tv.applyLibraryFormat(command) { return }
+        }
+
         if blocks.isEmpty {
             blocks.append(Block(type: .paragraph, spans: [TextSpan("")]))
         }
-        var draft = blocks[0].markdown
-        draft = JottTextFormatting.applying(command, to: draft)
-        blocks[0] = MarkdownConverter.parse(draft).first ?? Block(type: .paragraph, spans: [TextSpan(draft)])
+        switch command {
+        case .bulletList:
+            blocks[0].type = .bulletItem
+        case .numberedList:
+            blocks[0].type = .numberedItem
+        case .taskList:
+            blocks[0].type = .taskItem
+            blocks[0].checked = false
+        case .quote:
+            blocks[0].type = .quote
+        case .heading:
+            blocks[0].type = .heading
+            blocks[0].level = 1
+        default:
+            break
+        }
     }
 
     private func insertTable(rows: Int, columns: Int) {
@@ -3263,20 +3237,32 @@ private struct LibraryStoredTableEditor: View {
 }
 
 private final class JottLibraryTextView: NSTextView {
+    var libraryFormatHandler: ((JottTextFormatCommand) -> Bool)?
+    var lastKnownSelectedRange = NSRange(location: 0, length: 0)
+
+    func applyLibraryFormat(_ command: JottTextFormatCommand) -> Bool {
+        libraryFormatHandler?(command) ?? false
+    }
+
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted {
             JottTextFormattingRegistry.activeTextView = self
+            let currentSelection = selectedRange()
+            if currentSelection.location != 0 || lastKnownSelectedRange.location == 0 {
+                lastKnownSelectedRange = currentSelection
+            }
         }
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
-        let resigned = super.resignFirstResponder()
-        if resigned, JottTextFormattingRegistry.activeTextView === self {
-            JottTextFormattingRegistry.activeTextView = nil
-        }
-        return resigned
+        // Keep the editor registered while toolbar buttons take focus.
+        // The formatting bar lives outside NSTextView, so clearing this here
+        // makes list buttons fall back to mutating blocks[0] instead of the
+        // line/selection the user was editing.
+        lastKnownSelectedRange = selectedRange()
+        return super.resignFirstResponder()
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -3288,174 +3274,681 @@ private final class JottLibraryTextView: NSTextView {
             return super.performKeyEquivalent(with: event)
         }
         switch event.charactersIgnoringModifiers {
-        case "b": JottTextFormatting.apply(.bold, to: self); return true
-        case "i": JottTextFormatting.apply(.italic, to: self); return true
-        case "u": JottTextFormatting.apply(.underline, to: self); return true
-        case "e": JottTextFormatting.apply(.inlineCode, to: self); return true
+        case "b": _ = applyLibraryFormat(.bold); return true
+        case "i": _ = applyLibraryFormat(.italic); return true
+        case "u": _ = applyLibraryFormat(.underline); return true
+        case "e": _ = applyLibraryFormat(.inlineCode); return true
         default: return super.performKeyEquivalent(with: event)
         }
     }
 }
 
-private struct LibraryAIInlineEditor: NSViewRepresentable {
-    @Binding var text: String
-    var suggestion: String?
-    var isDark: Bool
-    var onTextChange: ((String) -> Void)?
-    var onSuggestionAccepted: () -> Void
-    var onSuggestionDismissed: () -> Void
+// MARK: - Block-aware NSTextView editor
+
+private let kJBType    = NSAttributedString.Key("JottBlockType")
+private let kJBLevel   = NSAttributedString.Key("JottBlockLevel")
+private let kJBChecked = NSAttributedString.Key("JottBlockChecked")
+
+struct LibraryNoteTextEditor: NSViewRepresentable {
+    @Binding var blocks: [Block]
+    let isDark: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.autohidesScrollers = true
+        let sv = NSScrollView()
+        sv.hasVerticalScroller = false
+        sv.drawsBackground = false
+        sv.borderType = .noBorder
 
-        let textView = JottLibraryTextView()
-        textView.delegate = context.coordinator
-        textView.isRichText = false
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.drawsBackground = false
-        textView.backgroundColor = .clear
-        textView.font = .systemFont(ofSize: 14)
-        textView.isHorizontallyResizable = false
-        textView.isVerticallyResizable = true
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.heightTracksTextView = false
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.textContainerInset = .zero
+        let tv = JottLibraryTextView()
+        tv.delegate = context.coordinator
+        tv.isRichText = false
+        tv.isEditable = true
+        tv.isSelectable = true
+        tv.drawsBackground = false
+        tv.backgroundColor = .clear
+        tv.isHorizontallyResizable = false
+        tv.isVerticallyResizable = true
+        tv.autoresizingMask = [.width]
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.heightTracksTextView = false
+        tv.textContainer?.lineFragmentPadding = 2
+        tv.textContainerInset = NSSize(width: 0, height: 4)
 
-        scrollView.documentView = textView
-        context.coordinator.textView = textView
-        DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        sv.documentView = tv
+        context.coordinator.tv = tv
         let coordinator = context.coordinator
-        coordinator.parent = self
-
-        let textColor: NSColor = isDark
-            ? .white.withAlphaComponent(0.90)
-            : .black.withAlphaComponent(0.85)
-        let ghostColor: NSColor = isDark
-            ? NSColor(white: 0.72, alpha: 0.42)
-            : NSColor(white: 0.58, alpha: 0.72)
-        let font = NSFont.systemFont(ofSize: 14)
-        let targetString = text + (suggestion ?? "")
-
-        if textView.textStorage?.string != targetString {
-            let savedSelection = textView.selectedRange()
-            let attributed = NSMutableAttributedString(
-                string: text,
-                attributes: [.font: font, .foregroundColor: textColor]
-            )
-            if let suggestion, !suggestion.isEmpty {
-                attributed.append(
-                    NSAttributedString(
-                        string: suggestion,
-                        attributes: [.font: font, .foregroundColor: ghostColor]
-                    )
-                )
-                coordinator.ghostStart = text.utf16.count
-            } else {
-                coordinator.ghostStart = nil
-            }
-
-            textView.textStorage?.setAttributedString(attributed)
-            textView.setSelectedRange(NSRange(location: min(savedSelection.location, text.utf16.count), length: 0))
+        tv.libraryFormatHandler = { [weak coordinator, weak tv] command in
+            guard let coordinator, let tv else { return false }
+            return coordinator.applyFormat(command, in: tv)
         }
+        context.coordinator.load(blocks, into: tv)
+        DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
+        return sv
     }
+
+    func updateNSView(_ sv: NSScrollView, context: Context) {
+        guard let tv = sv.documentView as? NSTextView else { return }
+        context.coordinator.parent = self
+        guard !context.coordinator.suppressSync else { return }
+        let proposed = context.coordinator.displayString(for: blocks)
+        // A trailing \n in tv.string means the user just pressed Enter at the end;
+        // that pending newline is not yet reflected in blocks — don't reload over it.
+        let current = context.coordinator.withoutTrailingNewlines(tv.string)
+        let comparableProposed = context.coordinator.withoutTrailingNewlines(proposed)
+        if current != comparableProposed { context.coordinator.load(blocks, into: tv) }
+    }
+
+    // MARK: Coordinator
 
     final class Coordinator: NSObject, NSTextViewDelegate {
-        var parent: LibraryAIInlineEditor
-        weak var textView: NSTextView?
-        var ghostStart: Int? = nil
+        var parent: LibraryNoteTextEditor
+        weak var tv: NSTextView?
+        var suppressSync = false
 
-        init(_ parent: LibraryAIInlineEditor) {
-            self.parent = parent
-        }
+        init(_ parent: LibraryNoteTextEditor) { self.parent = parent }
 
-        func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
-            JottTextFormattingRegistry.activeTextView = textView
-            guard let ghostStart else { return true }
-            let totalLength = textView.textStorage?.length ?? 0
-            if totalLength > ghostStart {
-                textView.textStorage?.deleteCharacters(in: NSRange(location: ghostStart, length: totalLength - ghostStart))
+        func withoutTrailingNewlines(_ text: String) -> String {
+            var result = text
+            while result.hasSuffix("\n") {
+                result.removeLast()
             }
-            self.ghostStart = nil
-            DispatchQueue.main.async { self.parent.onSuggestionDismissed() }
-            return true
+            return result
         }
 
-        func textDidChange(_ notification: Notification) {
-            guard let textView else { return }
-            JottTextFormattingRegistry.activeTextView = textView
-            let newText = textView.string
-            parent.text = newText
-            parent.onTextChange?(newText)
+        // MARK: Load blocks → attributed string
+
+        func load(_ blocks: [Block], into tv: NSTextView) {
+            guard let storage = tv.textStorage else { return }
+            let saved = tv.selectedRange()
+            storage.beginEditing()
+            storage.setAttributedString(makeAttributedString(blocks))
+            storage.endEditing()
+            tv.setSelectedRange(NSRange(location: min(saved.location, storage.length), length: 0))
+            updateTypingAttrs(tv)
         }
 
-        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            if selector == #selector(NSResponder.insertTab(_:)), let ghostStart {
-                guard let storage = textView.textStorage else { return false }
-                let totalLength = storage.length
-                let ghostRange = NSRange(location: ghostStart, length: totalLength - ghostStart)
-                let realAttributes: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 14),
-                    .foregroundColor: parent.isDark
-                        ? NSColor.white.withAlphaComponent(0.90)
-                        : NSColor.black.withAlphaComponent(0.85)
-                ]
-                storage.setAttributes(realAttributes, range: ghostRange)
-                self.ghostStart = nil
-                parent.text = storage.string
-                parent.onSuggestionAccepted()
-                textView.setSelectedRange(NSRange(location: storage.length, length: 0))
-                return true
+        func makeAttributedString(_ blocks: [Block]) -> NSAttributedString {
+            let out = NSMutableAttributedString()
+            var nIdx = 1
+            for (i, b) in blocks.enumerated() {
+                if i > 0 { out.append(NSAttributedString(string: "\n", attributes: paraAttrs(parent.isDark))) }
+                let (line, attrs) = lineAndAttrs(b, nIdx: nIdx, dark: parent.isDark)
+                if b.type == .numberedItem { nIdx += 1 } else { nIdx = 1 }
+                out.append(NSAttributedString(string: line, attributes: attrs))
             }
+            return out
+        }
 
-            if selector == #selector(NSResponder.cancelOperation(_:)), let ghostStart {
-                let totalLength = textView.textStorage?.length ?? 0
-                if totalLength > ghostStart {
-                    textView.textStorage?.deleteCharacters(in: NSRange(location: ghostStart, length: totalLength - ghostStart))
+        // MARK: Display string (used only for change detection)
+
+        func displayString(for blocks: [Block]) -> String {
+            var n = 1
+            return blocks.map { b -> String in
+                switch b.type {
+                case .bulletItem:
+                    n = 1
+                    return "• \(b.plainText)"
+                case .numberedItem:
+                    defer { n += 1 }
+                    return "\(n). \(b.plainText)"
+                case .taskItem:
+                    n = 1
+                    return "\(b.checked ? "☑" : "☐") \(b.plainText)"
+                case .divider:
+                    n = 1
+                    return "─────────────────────"
+                default:
+                    n = 1
+                    return b.plainText
                 }
-                self.ghostStart = nil
-                parent.onSuggestionDismissed()
+            }.joined(separator: "\n")
+        }
+
+        // MARK: Line + attributes per block
+
+        func lineAndAttrs(_ b: Block, nIdx: Int, dark: Bool) -> (String, [NSAttributedString.Key: Any]) {
+            let content = b.plainText
+            switch b.type {
+            case .paragraph:
+                return (content, paraAttrs(dark))
+            case .heading:
+                return (content, headingAttrs(level: b.level, dark: dark))
+            case .bulletItem:
+                return ("• \(content)", listAttrs(indent: 14, type: .bulletItem, dark: dark))
+            case .numberedItem:
+                return ("\(nIdx). \(content)", listAttrs(indent: 24, type: .numberedItem, dark: dark))
+            case .taskItem:
+                return ("\(b.checked ? "☑" : "☐") \(content)", taskAttrs(checked: b.checked, dark: dark))
+            case .quote:
+                return (content, quoteAttrs(dark: dark))
+            case .divider:
+                return ("─────────────────────", dividerAttrs(dark: dark))
+            default:
+                return (b.plainText, paraAttrs(dark))
+            }
+        }
+
+        // MARK: Extract blocks from storage
+
+        func extractBlocks(from storage: NSTextStorage) -> [Block] {
+            let str = storage.string as NSString
+            var result: [Block] = []
+            var loc = 0
+            while loc < storage.length {
+                let pr = str.paragraphRange(for: NSRange(location: loc, length: 0))
+                let hasNL = pr.length > 0 && str.character(at: pr.location + pr.length - 1) == 10
+                let lineNSRange = NSRange(location: pr.location, length: pr.length - (hasNL ? 1 : 0))
+                let line = str.substring(with: lineNSRange)
+
+                let attrs = safeAttributes(in: storage, at: pr.location)
+                let typeRaw = attrs[kJBType] as? String ?? BlockType.paragraph.rawValue
+                let btype   = BlockType(rawValue: typeRaw) ?? .paragraph
+                let level   = attrs[kJBLevel]   as? Int  ?? 1
+                let checked = attrs[kJBChecked] as? Bool ?? false
+
+                result.append(blockFromDisplayedLine(line, type: btype, level: level, checked: checked))
+                loc = NSMaxRange(pr)
+            }
+            return result.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : result
+        }
+
+        func blockFromDisplayedLine(_ line: String, type: BlockType, level: Int, checked: Bool) -> Block {
+            switch type {
+            case .heading:
+                return Block(type: .heading, spans: [TextSpan(line)], level: max(1, min(level, 3)))
+            case .bulletItem:
+                let t = line.hasPrefix("• ") ? String(line.dropFirst(2)) : line
+                return Block(type: .bulletItem, spans: [TextSpan(t)])
+            case .numberedItem:
+                let t: String
+                if let r = line.range(of: #"^\d+\. "#, options: .regularExpression) { t = String(line[r.upperBound...]) } else { t = line }
+                return Block(type: .numberedItem, spans: [TextSpan(t)])
+            case .taskItem:
+                let isChecked = line.hasPrefix("☑ ")
+                let t = (line.hasPrefix("☑ ") || line.hasPrefix("☐ ")) ? String(line.dropFirst(2)) : line
+                return Block(type: .taskItem, spans: [TextSpan(t)], checked: isChecked || checked)
+            case .quote:
+                return Block(type: .quote, spans: [TextSpan(line)])
+            case .divider:
+                return Block(type: .divider)
+            default:
+                return Block(type: .paragraph, spans: [TextSpan(line)])
+            }
+        }
+
+        // MARK: Attribute factories
+
+        func paraAttrs(_ dark: Bool) -> [NSAttributedString.Key: Any] {
+            let ps = NSMutableParagraphStyle(); ps.lineSpacing = 3
+            return [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: textColor(dark, 0.88),
+                    .paragraphStyle: ps, kJBType: BlockType.paragraph.rawValue]
+        }
+
+        func headingAttrs(level: Int, dark: Bool) -> [NSAttributedString.Key: Any] {
+            let sz: CGFloat = level == 1 ? 20 : level == 2 ? 17 : 15
+            let wt: NSFont.Weight = level == 1 ? .bold : .semibold
+            let ps = NSMutableParagraphStyle(); ps.lineSpacing = 2; ps.paragraphSpacingBefore = level == 1 ? 6 : 3
+            return [.font: NSFont.systemFont(ofSize: sz, weight: wt), .foregroundColor: textColor(dark, 0.92),
+                    .paragraphStyle: ps, kJBType: BlockType.heading.rawValue, kJBLevel: level]
+        }
+
+        func listAttrs(indent: CGFloat, type: BlockType, dark: Bool) -> [NSAttributedString.Key: Any] {
+            let ps = NSMutableParagraphStyle(); ps.headIndent = indent; ps.firstLineHeadIndent = 0; ps.lineSpacing = 3
+            return [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: textColor(dark, 0.88),
+                    .paragraphStyle: ps, kJBType: type.rawValue]
+        }
+
+        func taskAttrs(checked: Bool, dark: Bool) -> [NSAttributedString.Key: Any] {
+            let alpha: CGFloat = checked ? 0.38 : 0.88
+            let ps = NSMutableParagraphStyle(); ps.headIndent = 16; ps.lineSpacing = 3
+            var a: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 14), .foregroundColor: textColor(dark, alpha),
+                .paragraphStyle: ps, kJBType: BlockType.taskItem.rawValue, kJBChecked: checked
+            ]
+            if checked { a[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            return a
+        }
+
+        func quoteAttrs(dark: Bool) -> [NSAttributedString.Key: Any] {
+            let ps = NSMutableParagraphStyle(); ps.headIndent = 12; ps.firstLineHeadIndent = 12; ps.lineSpacing = 3
+            let italicFont = NSFontManager.shared.convert(NSFont.systemFont(ofSize: 14), toHaveTrait: .italicFontMask)
+            return [.font: italicFont, .foregroundColor: textColor(dark, 0.52),
+                    .paragraphStyle: ps, kJBType: BlockType.quote.rawValue]
+        }
+
+        func dividerAttrs(dark: Bool) -> [NSAttributedString.Key: Any] {
+            let ps = NSMutableParagraphStyle(); ps.lineSpacing = 6; ps.paragraphSpacingBefore = 4
+            return [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: textColor(dark, 0.25),
+                    .paragraphStyle: ps, kJBType: BlockType.divider.rawValue]
+        }
+
+        func textColor(_ dark: Bool, _ alpha: CGFloat) -> NSColor {
+            dark ? NSColor.white.withAlphaComponent(alpha) : NSColor.black.withAlphaComponent(alpha)
+        }
+
+        func updateTypingAttrs(_ tv: NSTextView) {
+            guard let storage = tv.textStorage, storage.length > 0 else {
+                tv.typingAttributes = paraAttrs(parent.isDark); return
+            }
+            let loc = tv.selectedRange().location
+            if isTrailingEmptyParagraph(cursor: loc, storage: storage) {
+                tv.typingAttributes = paraAttrs(parent.isDark)
+                return
+            }
+            // When cursor is past end of storage (e.g. just inserted newline at end),
+            // there's no character to read from — leave typingAttributes as already set.
+            guard loc < storage.length else { return }
+            let keep: Set<NSAttributedString.Key> = [.font, .foregroundColor, .paragraphStyle,
+                                                       .strikethroughStyle, kJBType, kJBLevel, kJBChecked]
+            let ta = storage.attributes(at: loc, effectiveRange: nil).filter { keep.contains($0.key) }
+            tv.typingAttributes = ta
+        }
+
+        // MARK: Toolbar formatting
+
+        func applyFormat(_ command: JottTextFormatCommand, in tv: NSTextView) -> Bool {
+            switch command {
+            case .bulletList:
+                applyParagraphFormat(prefix: "• ", attrs: listAttrs(indent: 14, type: .bulletItem, dark: parent.isDark), in: tv)
+                return true
+            case .numberedList:
+                applyParagraphFormat(prefix: "1. ", attrs: listAttrs(indent: 24, type: .numberedItem, dark: parent.isDark), in: tv)
+                renumber(in: tv)
+                return true
+            case .taskList:
+                applyParagraphFormat(prefix: "☐ ", attrs: taskAttrs(checked: false, dark: parent.isDark), in: tv)
+                return true
+            case .quote:
+                applyParagraphFormat(prefix: "", attrs: quoteAttrs(dark: parent.isDark), in: tv)
+                return true
+            case .heading:
+                applyParagraphFormat(prefix: "", attrs: headingAttrs(level: 1, dark: parent.isDark), in: tv)
+                return true
+            default:
                 return true
             }
+        }
 
-            if selector == #selector(NSResponder.insertNewline(_:)) ||
-               selector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
-                if JottTextFormatting.handleContinuationNewline(in: textView) { return true }
-                textView.insertText("\n", replacementRange: textView.selectedRange())
-                return true
+        func applyParagraphFormat(prefix: String, attrs: [NSAttributedString.Key: Any], in tv: NSTextView) {
+            guard let storage = tv.textStorage else { return }
+            let selected = stableSelectedRange(in: tv)
+            tv.setSelectedRange(selected)
+
+            if selected.length == 0,
+               selected.location == storage.length,
+               storage.string.hasSuffix("\n") {
+                storage.beginEditing()
+                storage.replaceCharacters(in: selected, with: prefix)
+                if !prefix.isEmpty {
+                    storage.setAttributes(attrs, range: NSRange(location: selected.location, length: (prefix as NSString).length))
+                }
+                storage.endEditing()
+                let cursor = selected.location + (prefix as NSString).length
+                tv.setSelectedRange(NSRange(location: cursor, length: 0))
+                if let libraryTextView = tv as? JottLibraryTextView {
+                    libraryTextView.lastKnownSelectedRange = tv.selectedRange()
+                }
+                tv.typingAttributes = attrs
+                tv.didChangeText()
+                return
             }
 
-            if selector == #selector(NSResponder.insertTab(_:)),
-               JottTextFormatting.handleTab(in: textView) {
-                return true
+            let ns = storage.string as NSString
+            let safeLocation = min(selected.location, storage.length)
+            let targetRange = ns.paragraphRange(for: NSRange(location: safeLocation, length: selected.length))
+            var starts: [Int] = []
+
+            if targetRange.length == 0 {
+                starts = [targetRange.location]
+            } else {
+                var loc = targetRange.location
+                while loc < NSMaxRange(targetRange) {
+                    starts.append(loc)
+                    let pr = (storage.string as NSString).paragraphRange(for: NSRange(location: loc, length: 0))
+                    let next = NSMaxRange(pr)
+                    loc = next > loc ? next : loc + 1
+                }
             }
 
+            storage.beginEditing()
+            for start in starts.reversed() {
+                let currentString = storage.string as NSString
+                let clampedStart = min(start, currentString.length)
+                let pr = currentString.paragraphRange(for: NSRange(location: clampedStart, length: 0))
+                let hasNL = pr.length > 0 && currentString.character(at: pr.location + pr.length - 1) == 10
+                let lineRange = NSRange(location: pr.location, length: pr.length - (hasNL ? 1 : 0))
+                let line = lineRange.length > 0 ? currentString.substring(with: lineRange) : ""
+                let replacement = prefix + strippedBlockPrefix(from: line)
+                storage.replaceCharacters(in: lineRange, with: replacement)
+                let newPR = (storage.string as NSString).paragraphRange(for: NSRange(location: pr.location, length: 0))
+                if newPR.length > 0 {
+                    storage.setAttributes(attrs, range: newPR)
+                }
+            }
+            storage.endEditing()
+
+            let cursor = min(selected.location + (prefix as NSString).length, storage.length)
+            tv.setSelectedRange(NSRange(location: cursor, length: 0))
+            if let libraryTextView = tv as? JottLibraryTextView {
+                libraryTextView.lastKnownSelectedRange = tv.selectedRange()
+            }
+            tv.typingAttributes = attrs
+            tv.didChangeText()
+        }
+
+        func stableSelectedRange(in tv: NSTextView) -> NSRange {
+            let current = tv.selectedRange()
+            let stored = (tv as? JottLibraryTextView)?.lastKnownSelectedRange ?? current
+            let candidate = current.location == 0 && stored.location > 0 ? stored : current
+            let length = tv.textStorage?.length ?? tv.string.utf16.count
+            let location = min(max(candidate.location, 0), length)
+            let selectionLength = min(max(candidate.length, 0), max(0, length - location))
+            return NSRange(location: location, length: selectionLength)
+        }
+
+        func strippedBlockPrefix(from line: String) -> String {
+            var text = line
+            for prefix in ["• ", "☐ ", "☑ "] where text.hasPrefix(prefix) {
+                return String(text.dropFirst(prefix.count))
+            }
+            let patterns = [
+                #"^\d+\. "#,
+                #"^[-*+] "#,
+                #"^- \[[ xX]\] "#,
+                #"^#{1,6}\s+"#,
+                #"^>\s?"#
+            ]
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+                let ns = text as NSString
+                let range = NSRange(location: 0, length: ns.length)
+                if let match = regex.firstMatch(in: text, range: range), match.range.location == 0 {
+                    text = ns.substring(from: match.range.length)
+                    break
+                }
+            }
+            return text
+        }
+
+        // MARK: NSTextViewDelegate
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv else { return }
+            if let libraryTextView = tv as? JottLibraryTextView {
+                libraryTextView.lastKnownSelectedRange = tv.selectedRange()
+            }
+            updateTypingAttrs(tv)
+        }
+
+        func textView(_ tv: NSTextView, shouldChangeTextIn range: NSRange, replacementString repl: String?) -> Bool {
+            guard let repl, repl == " ", range.length == 0 else { return true }
+            return !handleSpaceTrigger(in: tv, at: range.location)
+        }
+
+        func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
+            if sel == #selector(NSResponder.insertNewline(_:))  { return handleEnter(in: tv) }
+            if sel == #selector(NSResponder.deleteBackward(_:)) { return handleBackspace(in: tv) }
             return false
         }
 
-        func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView,
-                  let ghostStart else { return }
-            let selection = textView.selectedRange()
-            if selection.location > ghostStart {
-                textView.setSelectedRange(NSRange(location: ghostStart, length: 0))
+        func textDidChange(_ notification: Notification) {
+            guard let tv, let storage = tv.textStorage else { return }
+            if let libraryTextView = tv as? JottLibraryTextView {
+                libraryTextView.lastKnownSelectedRange = tv.selectedRange()
             }
+            suppressSync = true
+            parent.blocks = extractBlocks(from: storage)
+            suppressSync = false
+        }
+
+        // MARK: Space trigger
+
+        func handleSpaceTrigger(in tv: NSTextView, at cursor: Int) -> Bool {
+            guard let storage = tv.textStorage else { return false }
+            let str = storage.string as NSString
+            let pr = str.paragraphRange(for: NSRange(location: cursor, length: 0))
+            let before = cursor > pr.location
+                ? str.substring(with: NSRange(location: pr.location, length: cursor - pr.location))
+                : ""
+
+            switch before {
+            case "-", "*", "+":
+                trigger(.bulletItem, level: 1, lineStart: pr.location, trigLen: before.utf16.count, prefix: "• ", dark: parent.isDark, in: tv)
+                return true
+            case "#":
+                trigger(.heading, level: 1, lineStart: pr.location, trigLen: 1, prefix: "", dark: parent.isDark, in: tv)
+                return true
+            case "##":
+                trigger(.heading, level: 2, lineStart: pr.location, trigLen: 2, prefix: "", dark: parent.isDark, in: tv)
+                return true
+            case "###":
+                trigger(.heading, level: 3, lineStart: pr.location, trigLen: 3, prefix: "", dark: parent.isDark, in: tv)
+                return true
+            case ">":
+                trigger(.quote, level: 1, lineStart: pr.location, trigLen: 1, prefix: "", dark: parent.isDark, in: tv)
+                return true
+            case "[]", "[ ]":
+                trigger(.taskItem, level: 1, lineStart: pr.location, trigLen: before.utf16.count, prefix: "☐ ", dark: parent.isDark, in: tv)
+                return true
+            case "[x]", "[X]":
+                trigger(.taskItem, level: 1, lineStart: pr.location, trigLen: before.utf16.count, prefix: "☑ ", dark: parent.isDark, in: tv, checked: true)
+                return true
+            default:
+                if before.range(of: #"^\d+\.$"#, options: .regularExpression) != nil {
+                    let num = String(before.dropLast())
+                    trigger(.numberedItem, level: 1, lineStart: pr.location, trigLen: before.utf16.count, prefix: "\(num). ", dark: parent.isDark, in: tv)
+                    return true
+                }
+                return false
+            }
+        }
+
+        func trigger(_ type: BlockType, level: Int, lineStart: Int, trigLen: Int, prefix: String, dark: Bool, in tv: NSTextView, checked: Bool = false) {
+            guard let storage = tv.textStorage else { return }
+            var attrs: [NSAttributedString.Key: Any]
+            switch type {
+            case .bulletItem:   attrs = listAttrs(indent: 14, type: .bulletItem, dark: dark)
+            case .numberedItem: attrs = listAttrs(indent: 24, type: .numberedItem, dark: dark)
+            case .heading:      attrs = headingAttrs(level: level, dark: dark)
+            case .taskItem:     attrs = taskAttrs(checked: checked, dark: dark)
+            case .quote:        attrs = quoteAttrs(dark: dark)
+            default:            attrs = paraAttrs(dark)
+            }
+            storage.beginEditing()
+            storage.replaceCharacters(in: NSRange(location: lineStart, length: trigLen), with: prefix)
+            let newPR = (storage.string as NSString).paragraphRange(for: NSRange(location: lineStart, length: 0))
+            storage.setAttributes(attrs, range: newPR)
+            storage.endEditing()
+            let cur = lineStart + (prefix as NSString).length
+            tv.setSelectedRange(NSRange(location: cur, length: 0))
+            tv.typingAttributes = attrs
+            tv.didChangeText()
+        }
+
+        // MARK: Enter
+
+        func handleEnter(in tv: NSTextView) -> Bool {
+            guard tv.selectedRange().length == 0, let storage = tv.textStorage else { return false }
+            let cursor = tv.selectedRange().location
+            let str = storage.string as NSString
+            let pr = str.paragraphRange(for: NSRange(location: cursor, length: 0))
+            let before = cursor > pr.location
+                ? str.substring(with: NSRange(location: pr.location, length: cursor - pr.location))
+                : ""
+            let attrs = currentParagraphAttributes(in: storage, paragraphLocation: pr.location, cursor: cursor)
+            let btype = BlockType(rawValue: attrs[kJBType] as? String ?? "") ?? .paragraph
+
+            switch btype {
+            case .bulletItem:
+                let content = before.hasPrefix("• ") ? String(before.dropFirst(2)) : before
+                if content.trimmingCharacters(in: .whitespaces).isEmpty {
+                    exitList(lineStart: pr.location, prefixLen: min(2, before.utf16.count), in: tv); return true
+                }
+                continueLine(prefix: "• ", attrs: attrs, in: tv); return true
+
+            case .numberedItem:
+                let (num, pLen) = parseNumPrefix(before)
+                let content = pLen < before.utf16.count ? (before as NSString).substring(from: pLen) : ""
+                if content.trimmingCharacters(in: .whitespaces).isEmpty && !before.isEmpty {
+                    exitList(lineStart: pr.location, prefixLen: pLen, in: tv); return true
+                }
+                continueLine(prefix: "\(num + 1). ", attrs: attrs, in: tv)
+                renumber(in: tv); return true
+
+            case .taskItem:
+                let pfx = before.hasPrefix("☑ ") || before.hasPrefix("☐ ") ? 2 : 0
+                let content = pfx > 0 ? String(before.dropFirst(pfx)) : before
+                if content.trimmingCharacters(in: .whitespaces).isEmpty {
+                    exitList(lineStart: pr.location, prefixLen: pfx, in: tv); return true
+                }
+                let newA = taskAttrs(checked: false, dark: parent.isDark)
+                continueLine(prefix: "☐ ", attrs: newA, in: tv); return true
+
+            case .heading:
+                continueLine(prefix: "", attrs: paraAttrs(parent.isDark), in: tv, overrideType: true); return true
+
+            case .quote:
+                if before.trimmingCharacters(in: .whitespaces).isEmpty {
+                    exitList(lineStart: pr.location, prefixLen: 0, in: tv); return true
+                }
+                continueLine(prefix: "", attrs: attrs, in: tv); return true
+
+            default: return false
+            }
+        }
+
+        func continueLine(prefix: String, attrs: [NSAttributedString.Key: Any], in tv: NSTextView, overrideType: Bool = false) {
+            guard let storage = tv.textStorage else { return }
+            let resolvedAttrs = overrideType ? paraAttrs(parent.isDark) : attrs
+            let insertionRange = tv.selectedRange()
+            let inserted = "\n\(prefix)" as NSString
+            // Use storage editing directly so we can set attributes atomically before
+            // textDidChange fires. tv.insertText would fire textViewDidChangeSelection
+            // mid-edit before setAttributes, giving extractBlocks the wrong block type.
+            storage.beginEditing()
+            storage.replaceCharacters(in: insertionRange, with: inserted as String)
+            let newCursor = insertionRange.location + inserted.length
+            let newParaLoc = newCursor - (prefix as NSString).length
+            let newPR = (storage.string as NSString).paragraphRange(for: NSRange(location: newParaLoc, length: 0))
+            storage.setAttributes(resolvedAttrs, range: newPR)
+            storage.endEditing()
+            tv.setSelectedRange(NSRange(location: newCursor, length: 0))
+            if let libraryTextView = tv as? JottLibraryTextView {
+                libraryTextView.lastKnownSelectedRange = tv.selectedRange()
+            }
+            tv.typingAttributes = resolvedAttrs
+            tv.didChangeText()
+        }
+
+        func exitList(lineStart: Int, prefixLen: Int, in tv: NSTextView) {
+            guard let storage = tv.textStorage else { return }
+            let pa = paraAttrs(parent.isDark)
+            storage.beginEditing()
+            if prefixLen > 0 { storage.replaceCharacters(in: NSRange(location: lineStart, length: prefixLen), with: "") }
+            let newPR = (storage.string as NSString).paragraphRange(for: NSRange(location: lineStart, length: 0))
+            storage.setAttributes(pa, range: newPR)
+            storage.endEditing()
+            tv.setSelectedRange(NSRange(location: lineStart, length: 0))
+            if let libraryTextView = tv as? JottLibraryTextView {
+                libraryTextView.lastKnownSelectedRange = tv.selectedRange()
+            }
+            tv.typingAttributes = pa
+            tv.didChangeText()
+        }
+
+        // MARK: Backspace
+
+        func handleBackspace(in tv: NSTextView) -> Bool {
+            guard tv.selectedRange().length == 0, let storage = tv.textStorage else { return false }
+            let cursor = tv.selectedRange().location
+            let str = storage.string as NSString
+            let pr = str.paragraphRange(for: NSRange(location: cursor, length: 0))
+            let before = cursor > pr.location
+                ? str.substring(with: NSRange(location: pr.location, length: cursor - pr.location))
+                : ""
+            let btype = BlockType(rawValue: currentParagraphAttributes(in: storage, paragraphLocation: pr.location, cursor: cursor)[kJBType] as? String ?? "") ?? .paragraph
+
+            let hasNLAtEnd = pr.length > 0 && str.character(at: NSMaxRange(pr) - 1) == 10
+            let lineTextEnd = NSMaxRange(pr) - (hasNLAtEnd ? 1 : 0)
+            let cursorAtLineEnd = cursor >= lineTextEnd
+
+            switch btype {
+            case .bulletItem where before == "• ":
+                // Only exit the list when there is no content after the cursor on this line.
+                if cursorAtLineEnd { exitList(lineStart: pr.location, prefixLen: 2, in: tv); return true }
+            case .taskItem where before == "☐ " || before == "☑ ":
+                if cursorAtLineEnd { exitList(lineStart: pr.location, prefixLen: 2, in: tv); return true }
+            case .heading where cursor == pr.location:
+                exitList(lineStart: pr.location, prefixLen: 0, in: tv); return true
+            case .quote where cursor == pr.location:
+                exitList(lineStart: pr.location, prefixLen: 0, in: tv); return true
+            case .numberedItem:
+                let (_, pLen) = parseNumPrefix(before)
+                if before.utf16.count == pLen && cursorAtLineEnd {
+                    exitList(lineStart: pr.location, prefixLen: pLen, in: tv); return true
+                }
+            default: break
+            }
+            return false
+        }
+
+        // MARK: Helpers
+
+        func parseNumPrefix(_ text: String) -> (Int, Int) {
+            let ns = text as NSString
+            guard let m = try? NSRegularExpression(pattern: #"^(\d+)\. "#)
+                .firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return (1, 0) }
+            return (Int(ns.substring(with: m.range(at: 1))) ?? 1, m.range.length)
+        }
+
+        func renumber(in tv: NSTextView) {
+            guard let storage = tv.textStorage else { return }
+            var edits: [(NSRange, String)] = []
+            var n = 1
+            var loc = 0
+            while loc < storage.length {
+                let pr = (storage.string as NSString).paragraphRange(for: NSRange(location: loc, length: 0))
+                let hasNL = pr.length > 0 && (storage.string as NSString).character(at: pr.location + pr.length - 1) == 10
+                let lr = NSRange(location: pr.location, length: pr.length - (hasNL ? 1 : 0))
+                let line = (storage.string as NSString).substring(with: lr)
+                let attrs = safeAttributes(in: storage, at: pr.location)
+                if BlockType(rawValue: attrs[kJBType] as? String ?? "") == .numberedItem {
+                    let (_, pLen) = parseNumPrefix(line)
+                    let content = pLen < line.utf16.count ? (line as NSString).substring(from: pLen) : ""
+                    let want = "\(n). \(content)"
+                    if line != want { edits.append((lr, want)) }
+                    n += 1
+                } else { n = 1 }
+                loc = NSMaxRange(pr)
+            }
+            guard !edits.isEmpty else { return }
+            storage.beginEditing()
+            for (r, s) in edits.reversed() { storage.replaceCharacters(in: r, with: s) }
+            storage.endEditing()
+            tv.didChangeText()
+        }
+
+        func isTrailingEmptyParagraph(cursor: Int, storage: NSTextStorage) -> Bool {
+            cursor == storage.length && storage.length > 0 && storage.string.hasSuffix("\n")
+        }
+
+        func currentParagraphAttributes(in storage: NSTextStorage, paragraphLocation: Int, cursor: Int) -> [NSAttributedString.Key: Any] {
+            if isTrailingEmptyParagraph(cursor: cursor, storage: storage) {
+                return paraAttrs(parent.isDark)
+            }
+            return safeAttributes(in: storage, at: paragraphLocation)
+        }
+
+        func safeAttributes(in storage: NSTextStorage, at location: Int) -> [NSAttributedString.Key: Any] {
+            guard storage.length > 0 else { return paraAttrs(parent.isDark) }
+            let safeLocation = min(max(location, 0), storage.length - 1)
+            return storage.attributes(at: safeLocation, effectiveRange: nil)
         }
     }
 }
+
 
 private struct LibraryReminderInspector: View {
     let reminder: Reminder

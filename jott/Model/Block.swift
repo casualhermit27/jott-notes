@@ -17,6 +17,8 @@ struct TextSpan: Codable, Equatable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case text
+        case marks
+        case link
         case bold
         case italic
         case underline
@@ -25,6 +27,12 @@ struct TextSpan: Codable, Equatable, Hashable {
         case highlight
         case linkURL
         case noteRef
+    }
+
+    private enum LinkCodingKeys: String, CodingKey {
+        case url
+        case noteID
+        case note_id
     }
 
     init(_ text: String, bold: Bool = false, italic: Bool = false,
@@ -48,27 +56,46 @@ struct TextSpan: Codable, Equatable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         text = try container.decode(String.self, forKey: .text)
-        bold = try container.decodeIfPresent(Bool.self, forKey: .bold) ?? false
-        italic = try container.decodeIfPresent(Bool.self, forKey: .italic) ?? false
-        underline = try container.decodeIfPresent(Bool.self, forKey: .underline) ?? false
-        code = try container.decodeIfPresent(Bool.self, forKey: .code) ?? false
-        strikethrough = try container.decodeIfPresent(Bool.self, forKey: .strikethrough) ?? false
-        highlight = try container.decodeIfPresent(Bool.self, forKey: .highlight) ?? false
+        let marks = Set((try container.decodeIfPresent([String].self, forKey: .marks) ?? []).map { $0.lowercased() })
+        let legacyBold = try container.decodeIfPresent(Bool.self, forKey: .bold) ?? false
+        let legacyItalic = try container.decodeIfPresent(Bool.self, forKey: .italic) ?? false
+        let legacyUnderline = try container.decodeIfPresent(Bool.self, forKey: .underline) ?? false
+        let legacyCode = try container.decodeIfPresent(Bool.self, forKey: .code) ?? false
+        let legacyStrikethrough = try container.decodeIfPresent(Bool.self, forKey: .strikethrough) ?? false
+        let legacyHighlight = try container.decodeIfPresent(Bool.self, forKey: .highlight) ?? false
+        bold = marks.contains("bold") || legacyBold
+        italic = marks.contains("italic") || legacyItalic
+        underline = marks.contains("underline") || legacyUnderline
+        code = marks.contains("inline_code") || marks.contains("code") || legacyCode
+        strikethrough = marks.contains("strikethrough") || legacyStrikethrough
+        highlight = marks.contains("highlight") || legacyHighlight
         linkURL = try container.decodeIfPresent(String.self, forKey: .linkURL)
         noteRef = try container.decodeIfPresent(UUID.self, forKey: .noteRef)
+        if container.contains(.link) {
+            let link = try container.nestedContainer(keyedBy: LinkCodingKeys.self, forKey: .link)
+            linkURL = try link.decodeIfPresent(String.self, forKey: .url) ?? linkURL
+            noteRef = try link.decodeIfPresent(UUID.self, forKey: .noteID)
+                ?? link.decodeIfPresent(UUID.self, forKey: .note_id)
+                ?? noteRef
+        }
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(text, forKey: .text)
-        if bold { try container.encode(bold, forKey: .bold) }
-        if italic { try container.encode(italic, forKey: .italic) }
-        if underline { try container.encode(underline, forKey: .underline) }
-        if code { try container.encode(code, forKey: .code) }
-        if strikethrough { try container.encode(strikethrough, forKey: .strikethrough) }
-        if highlight { try container.encode(highlight, forKey: .highlight) }
-        try container.encodeIfPresent(linkURL, forKey: .linkURL)
-        try container.encodeIfPresent(noteRef, forKey: .noteRef)
+        var marks: [String] = []
+        if bold { marks.append("bold") }
+        if italic { marks.append("italic") }
+        if underline { marks.append("underline") }
+        if strikethrough { marks.append("strikethrough") }
+        if code { marks.append("inline_code") }
+        if highlight { marks.append("highlight") }
+        if !marks.isEmpty { try container.encode(marks, forKey: .marks) }
+        if linkURL != nil || noteRef != nil {
+            var link = container.nestedContainer(keyedBy: LinkCodingKeys.self, forKey: .link)
+            try link.encodeIfPresent(linkURL, forKey: .url)
+            try link.encodeIfPresent(noteRef, forKey: .note_id)
+        }
     }
 }
 
@@ -77,14 +104,36 @@ struct TextSpan: Codable, Equatable, Hashable {
 enum BlockType: String, Codable, Equatable, CaseIterable {
     case paragraph
     case heading        // uses `level` (1, 2, 3)
-    case bulletItem
-    case numberedItem
-    case taskItem
+    case bulletItem = "bullet_item"
+    case numberedItem = "numbered_item"
+    case taskItem = "task_item"
     case quote
-    case codeBlock
+    case codeBlock = "code_block"
     case table
     case divider
     case image
+    case toggle
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        switch value {
+        case "bulletItem": self = .bulletItem
+        case "numberedItem": self = .numberedItem
+        case "taskItem": self = .taskItem
+        case "codeBlock": self = .codeBlock
+        default:
+            guard let type = BlockType(rawValue: value) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown block type: \(value)")
+            }
+            self = type
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 // MARK: - Block
@@ -103,7 +152,32 @@ struct Block: Identifiable, Codable, Equatable {
     var code:         String        // codeBlock body
     var imageURL:     String?
     var imageAlt:     String
-    var meta:         [String: String]? // extensible plugin data
+    var children:     [Block]
+    var props:        [String: String] // styling, metadata, plugin data
+
+    var meta: [String: String]? {
+        get { props.isEmpty ? nil : props }
+        set { props = newValue ?? [:] }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case block_id
+        case type
+        case spans
+        case richText
+        case level
+        case checked
+        case tableHeaders
+        case tableRows
+        case language
+        case code
+        case imageURL
+        case imageAlt
+        case children
+        case props
+        case meta
+    }
 
     init(
         id:           UUID              = UUID(),
@@ -117,6 +191,8 @@ struct Block: Identifiable, Codable, Equatable {
         code:         String            = "",
         imageURL:     String?           = nil,
         imageAlt:     String            = "",
+        children:     [Block]           = [],
+        props:        [String: String]  = [:],
         meta:         [String: String]? = nil
     ) {
         self.id           = id
@@ -130,54 +206,69 @@ struct Block: Identifiable, Codable, Equatable {
         self.code         = code
         self.imageURL     = imageURL
         self.imageAlt     = imageAlt
-        self.meta         = meta
+        self.children     = children
+        self.props        = meta ?? props
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id)
+            ?? c.decodeIfPresent(UUID.self, forKey: .block_id)
+            ?? UUID()
+        type = try c.decode(BlockType.self, forKey: .type)
+        spans = try c.decodeIfPresent([TextSpan].self, forKey: .richText)
+            ?? c.decodeIfPresent([TextSpan].self, forKey: .spans)
+            ?? []
+        level = try c.decodeIfPresent(Int.self, forKey: .level) ?? 1
+        checked = try c.decodeIfPresent(Bool.self, forKey: .checked) ?? false
+        tableHeaders = try c.decodeIfPresent([String].self, forKey: .tableHeaders) ?? []
+        tableRows = try c.decodeIfPresent([[String]].self, forKey: .tableRows) ?? []
+        language = try c.decodeIfPresent(String.self, forKey: .language)
+        code = try c.decodeIfPresent(String.self, forKey: .code) ?? ""
+        imageURL = try c.decodeIfPresent(String.self, forKey: .imageURL)
+        imageAlt = try c.decodeIfPresent(String.self, forKey: .imageAlt) ?? ""
+        children = try c.decodeIfPresent([Block].self, forKey: .children) ?? []
+        props = try c.decodeIfPresent([String: String].self, forKey: .props)
+            ?? c.decodeIfPresent([String: String].self, forKey: .meta)
+            ?? [:]
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .block_id)
+        try c.encode(type, forKey: .type)
+        if !spans.isEmpty { try c.encode(spans, forKey: .richText) }
+        if type == .heading { try c.encode(level, forKey: .level) }
+        if type == .taskItem { try c.encode(checked, forKey: .checked) }
+        if !tableHeaders.isEmpty { try c.encode(tableHeaders, forKey: .tableHeaders) }
+        if !tableRows.isEmpty { try c.encode(tableRows, forKey: .tableRows) }
+        try c.encodeIfPresent(language, forKey: .language)
+        if !code.isEmpty { try c.encode(code, forKey: .code) }
+        try c.encodeIfPresent(imageURL, forKey: .imageURL)
+        if !imageAlt.isEmpty { try c.encode(imageAlt, forKey: .imageAlt) }
+        if !children.isEmpty { try c.encode(children, forKey: .children) }
+        if !props.isEmpty { try c.encode(props, forKey: .props) }
     }
 
     // MARK: Convenience
 
     /// Plain concatenated text of all spans (or code body for codeBlocks).
     var plainText: String {
-        type == .codeBlock ? code : spans.map(\.text).joined()
+        switch type {
+        case .codeBlock:
+            return code
+        case .table:
+            return (tableHeaders + tableRows.flatMap { $0 }).joined(separator: " ")
+        case .image:
+            return imageAlt
+        default:
+            return spans.map(\.text).joined()
+        }
     }
 
-    /// Render block as Markdown.
-    var markdown: String {
-        switch type {
-        case .paragraph:
-            return MarkdownConverter.spansToMarkdown(spans)
-
-        case .heading:
-            let prefix = String(repeating: "#", count: max(1, min(level, 3)))
-            return "\(prefix) \(MarkdownConverter.spansToMarkdown(spans))"
-
-        case .bulletItem:
-            return "- \(MarkdownConverter.spansToMarkdown(spans))"
-
-        case .numberedItem:
-            return "1. \(MarkdownConverter.spansToMarkdown(spans))"
-
-        case .taskItem:
-            return "- [\(checked ? "x" : " ")] \(MarkdownConverter.spansToMarkdown(spans))"
-
-        case .quote:
-            return "> \(MarkdownConverter.spansToMarkdown(spans))"
-
-        case .codeBlock:
-            let lang = language ?? ""
-            return "```\(lang)\n\(code)\n```"
-
-        case .table:
-            guard !tableHeaders.isEmpty else { return "" }
-            let header    = "| " + tableHeaders.joined(separator: " | ") + " |"
-            let separator = "| " + tableHeaders.map { _ in "---" }.joined(separator: " | ") + " |"
-            let rows      = tableRows.map { "| " + $0.joined(separator: " | ") + " |" }
-            return ([header, separator] + rows).joined(separator: "\n")
-
-        case .divider:
-            return "---"
-
-        case .image:
-            return "![\(imageAlt)](\(imageURL ?? ""))"
-        }
+    static func plainTextBlocks(from text: String) -> [Block] {
+        let lines = text.components(separatedBy: .newlines)
+        let blocks = lines.map { Block(type: .paragraph, spans: [TextSpan($0)]) }
+        return blocks.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : blocks
     }
 }

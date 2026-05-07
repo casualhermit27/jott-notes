@@ -7,7 +7,9 @@ struct IOSRootView: View {
     @State private var selectedNote: Note?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @StateObject private var quickCapture = JottQuickCaptureCenter.shared
+    @StateObject private var purchases = PurchaseManager.shared
     @State private var showRequestedNewNote = false
+    @State private var showPaywall = false
     private let syncTick = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -24,6 +26,12 @@ struct IOSRootView: View {
                     IOSEmptyDetail()
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showPaywall) {
+            IOSPaywallView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jottShowPaywall)) { _ in
+            showPaywall = true
         }
         .fullScreenCover(isPresented: $showRequestedNewNote) {
             IOSNewNoteComposerView(

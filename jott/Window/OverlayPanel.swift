@@ -13,6 +13,8 @@ class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 class OverlayPanel: NSPanel {
     /// Set to true while a drag operation is targeting the panel so resignKey doesn't dismiss it.
     static var suppressResignKey = false
+    /// Set to true when the overlay is in locked mode — outside clicks do not dismiss.
+    static var isLocked = false
 
     init() {
         super.init(
@@ -53,6 +55,7 @@ class OverlayPanel: NSPanel {
     override func resignKey() {
         super.resignKey()
         guard !Self.suppressResignKey else { return }
+        guard !Self.isLocked else { return }
         let hoverFrame = frame.insetBy(dx: -8, dy: -8)
         guard !hoverFrame.contains(NSEvent.mouseLocation) else { return }
         NotificationCenter.default.post(name: .overlayDidResignKey, object: nil)

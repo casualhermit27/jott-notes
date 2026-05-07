@@ -223,12 +223,11 @@ struct IOSLibraryView: View {
 
     private var fabButton: some View {
         Button { showNewNote = true } label: {
-            Image(systemName: "plus")
+            Image(systemName: "square.and.pencil")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(ds.accent, in: Circle())
-                .shadow(color: ds.accent.opacity(0.40), radius: 14, x: 0, y: 6)
+                .frame(width: 54, height: 54)
+                .background(ds.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .padding(.trailing, 20)

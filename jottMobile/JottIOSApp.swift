@@ -1,6 +1,10 @@
 import SwiftUI
 import UIKit
 
+extension Notification.Name {
+    static let jottShowPaywall = Notification.Name("jottShowPaywall")
+}
+
 class JottAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         application.registerForRemoteNotifications()
@@ -24,6 +28,10 @@ class JottAppDelegate: NSObject, UIApplicationDelegate {
 struct JottIOSApp: App {
     @UIApplicationDelegateAdaptor(JottAppDelegate.self) var appDelegate
     @StateObject private var noteStore = NoteStore.shared
+
+    init() {
+        PurchaseManager.shared.configure(apiKey: "test_xmAJDfyOTyKQcXPoxyezuXAidIO")
+    }
 
     var body: some Scene {
         WindowGroup {

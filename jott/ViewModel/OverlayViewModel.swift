@@ -40,6 +40,10 @@ final class OverlayViewModel: ObservableObject {
         }
     }
     @Published var isVisible: Bool = false
+    @Published var isLocked: Bool = false
+    @Published var focusedNote: Note? = nil
+    @Published var isFocusPillExpanded: Bool = false
+    @Published var isFocusPillHovering: Bool = false
     @Published var detectedType: DetectedType = .note
     @Published var autoSaveStatus: String = ""   // "" | contextual message
     @Published var feedbackIcon: String = "checkmark.circle.fill"
@@ -223,8 +227,7 @@ final class OverlayViewModel: ObservableObject {
                 }
                 // Check for checklist first
                 if let items = NaturalLanguageParser.detectChecklist(text) {
-                    let mdText = items.map { "- \($0)" }.joined(separator: "\n")
-                    store.upsertNote(Note(id: id, text: mdText, parentId: subnoteParentId))
+                    store.upsertNote(checklistNote(id: id, items: items))
                     if showFeedback {
                         showStoreFeedback(success: "Checklist · \(items.count) items", icon: "checklist")
                     }
@@ -291,8 +294,7 @@ final class OverlayViewModel: ObservableObject {
         if let items = NaturalLanguageParser.detectChecklist(raw) {
             let id = sessionNoteId ?? UUID()
             sessionNoteId = id
-            let mdText = items.map { "- \($0)" }.joined(separator: "\n")
-            store.upsertNote(Note(id: id, text: mdText, parentId: subnoteParentId))
+            store.upsertNote(checklistNote(id: id, items: items))
             if showFeedback {
                 showStoreFeedback(success: "Checklist · \(items.count) items", icon: "checklist")
             }
@@ -378,12 +380,21 @@ final class OverlayViewModel: ObservableObject {
     }
 
     private func noteFromDraft(id: UUID, text: String, tags: [String]) -> Note {
-        var blocks = MarkdownConverter.parse(text)
+        var blocks = text
+            .components(separatedBy: "\n")
+            .map { Block(type: .paragraph, spans: [TextSpan($0)]) }
         blocks.append(contentsOf: draftTables.map(\.block))
         if blocks.isEmpty {
             blocks = draftTables.map(\.block)
         }
         return Note(id: id, blocks: blocks, tags: tags, parentId: subnoteParentId)
+    }
+
+    private func checklistNote(id: UUID, items: [String]) -> Note {
+        let blocks = items.map {
+            Block(type: .bulletItem, spans: [TextSpan($0)])
+        }
+        return Note(id: id, blocks: blocks, parentId: subnoteParentId)
     }
 
     func showFeedback(_ message: String, icon: String = "checkmark.circle.fill") {
@@ -772,7 +783,15 @@ final class OverlayViewModel: ObservableObject {
 
     func saveEditedNote(_ originalNote: Note) {
         let cleaned = cleanedNoteBlocks(editingNoteBlocks)
-        guard !cleaned.isEmpty else { cancelEditingNote(); return }
+        guard !cleaned.isEmpty else {
+            // Note was never given content — silently destroy it without going to recently deleted
+            if cleanedNoteBlocks(originalNote.blocks).isEmpty {
+                selectedNote = nil
+                store.permanentlyDeleteNote(originalNote.id)
+            }
+            cancelEditingNote()
+            return
+        }
         var updated = originalNote
         updated.blocks = cleaned
         updated.modifiedAt = Date()
@@ -826,7 +845,7 @@ final class OverlayViewModel: ObservableObject {
     private func cleanedNoteBlocks(_ blocks: [Block]) -> [Block] {
         blocks.filter { block in
             switch block.type {
-            case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+            case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote, .toggle:
                 return !block.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             case .codeBlock:
                 return !block.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1087,7 +1106,7 @@ final class OverlayViewModel: ObservableObject {
         switch items[idx] {
         case .note(let n):
             inlineEditingId = n.id
-            inlineEditText = n.text.components(separatedBy: "\n").first ?? n.text
+            inlineEditText = n.blocks.first(where: { !$0.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.plainText ?? ""
         default:
             break // only notes support inline edit for now
         }
@@ -1098,12 +1117,17 @@ final class OverlayViewModel: ObservableObject {
         let newText = inlineEditText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newText.isEmpty else { cancelInlineEdit(); return }
         if var note = store.note(for: id) {
-            // Replace just the first line
-            let lines = note.text.components(separatedBy: "\n")
-            if lines.count > 1 {
-                note.text = ([newText] + lines.dropFirst()).joined(separator: "\n")
+            if let firstTextIndex = note.blocks.firstIndex(where: { block in
+                switch block.type {
+                case .paragraph, .heading, .bulletItem, .numberedItem, .taskItem, .quote:
+                    return true
+                default:
+                    return false
+                }
+            }) {
+                note.blocks[firstTextIndex].spans = [TextSpan(newText)]
             } else {
-                note.text = newText
+                note.blocks.insert(Block(type: .paragraph, spans: [TextSpan(newText)]), at: 0)
             }
             note.modifiedAt = Date()
             store.upsertNote(note)

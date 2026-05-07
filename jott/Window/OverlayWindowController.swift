@@ -8,6 +8,7 @@ class OverlayWindowController {
     private var hostingView: FirstMouseHostingView<OverlayView>?
     private var cancellables = Set<AnyCancellable>()
     private var dismissWorkItem: DispatchWorkItem?
+    private var escMonitor: Any?
 
     // Notch drop panel - fixed content width, anchored at top-center.
     private let panelHeight: CGFloat = 640
@@ -84,6 +85,20 @@ class OverlayWindowController {
                 self?.applyAppearance()
             }
             .store(in: &cancellables)
+
+        // Sync lock state to OverlayPanel so resignKey can respect it.
+        viewModel.$isLocked
+            .receive(on: DispatchQueue.main)
+            .sink { OverlayPanel.isLocked = $0 }
+            .store(in: &cancellables)
+
+        // ESC always dismisses regardless of lock state.
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }   // 53 = ESC
+            self?.viewModel.isLocked = false
+            self?.viewModel.dismiss()
+            return nil
+        }
     }
 
     func preload() {
