@@ -6,8 +6,15 @@ extension NSNotification.Name {
 }
 
 /// Shared hosting view that accepts first mouse — single click works without pre-focusing the window.
+/// Intrinsic content size is suppressed so the hosting view never tries to auto-resize the window;
+/// both OverlayPanel and FocusNotePanel always set their frames explicitly via setFrame().
 class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // Returning zero prevents the NSHostingView machinery from calling
+    // updateAnimatedWindowSize during layout, which otherwise creates an infinite
+    // layout-pass loop in AppKit (too many constraint update passes).
+    override var intrinsicContentSize: NSSize { .zero }
 }
 
 class OverlayPanel: NSPanel {
@@ -15,6 +22,15 @@ class OverlayPanel: NSPanel {
     static var suppressResignKey = false
     /// Set to true when the overlay is in locked mode — outside clicks do not dismiss.
     static var isLocked = false
+
+    private var suppressSwiftUIResize = false
+
+    override func setFrame(_ frameRect: NSRect, display displayFlag: Bool) {
+        guard !suppressSwiftUIResize else { return }
+        suppressSwiftUIResize = true
+        defer { suppressSwiftUIResize = false }
+        super.setFrame(frameRect, display: displayFlag)
+    }
 
     init() {
         super.init(

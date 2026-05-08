@@ -62,15 +62,27 @@ final class OverlayViewModel: ObservableObject {
     // Subnote navigation stack (for opening subnotes standalone)
     @Published var navigationStack: [Note] = []
 
-    // Notch morph reveal: 0 = notch size, 1 = full panel.
-    // Split by property so width can lead height like the native notch expansion.
+    // Kept current by FocusNotePillController so show() can read them synchronously.
+    var pillIsExpanded: Bool = false
+    var pillCompactHeight: CGFloat = 34  // 34 normal, 70 hover
+    // Called synchronously inside OverlayWindowController.show() before the overlay panel
+    // becomes visible — hides the pill in the same rendering pass as the overlay appearing.
+    var onWillShow: (() -> Void)? = nil
+
+    // Notch morph reveal: 0 = compact (notch/pill size), 1 = full panel.
+    // Width leads height, corners lag — all derived internally by NotchMorphShape from revealProgress.
     @Published var revealProgress: Double = 0
-    @Published var revealWidthProgress: Double = 0
-    @Published var revealHeightProgress: Double = 0
-    @Published var revealCornerProgress: Double = 0
-    @Published var revealContentProgress: Double = 0
-    @Published var revealExitProgress: Double = 0
-    @Published var revealSurfaceBiasProgress: Double = 0
+    @Published var revealExitProgress: Double = 0      // 0→1 on close: drives squish wobble
+    @Published var revealCompactWidth: CGFloat = 178
+    @Published var revealCompactHeight: CGFloat = 32
+
+    // Content opacity derived from revealProgress — no separate published property.
+    // UnifiedJottView reads this; ContentRevealModifier applies it with per-frame Animatable
+    // interpolation so content genuinely resolves from the surface rather than fading independently.
+    var revealContentProgress: Double {
+        let x = max(0.0, (revealProgress - 0.52) / 0.48)
+        return x * x * (3 - 2 * x)   // smoothstep: content appears in the last 48% of open
+    }
 
     // Note editing
     @Published var isEditingNote: Bool = false

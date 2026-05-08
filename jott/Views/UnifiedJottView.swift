@@ -3,7 +3,26 @@ import AppKit
 import Combine
 import EventKit
 
-private let jottNotchVoidBlack = Color(nsColor: NSColor(deviceWhite: 0.0, alpha: 1.0))
+// Near-black surface (#0A0A0A). Pure black creates too-hard edge contrast against bright wallpapers.
+private let jottNotchVoidBlack = Color(nsColor: NSColor(deviceWhite: 0.04, alpha: 1.0))
+
+// Content opacity tied directly to the morph spring via Animatable.
+// SwiftUI calls body(content:) with the per-frame interpolated progress value,
+// so content genuinely resolves out of the expanding surface rather than cross-fading independently.
+private struct ContentRevealModifier: ViewModifier, Animatable {
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        // Content fades in from ~42% open so it overlaps slightly with
+        // the pinned handoff icons fading out (which finish by ~45%).
+        let x = max(0.0, min(1.0, (progress - 0.42) / 0.58))
+        let opacity = x * x * (3 - 2 * x)  // smoothstep
+        return content.opacity(opacity)
+    }
+}
 
 enum JottTextFormatCommand: Equatable {
     case bold
@@ -275,9 +294,6 @@ struct JottCaptureView: View {
     @ObservedObject private var speech = SpeechManager.shared
     @State private var voicePrefix = ""
     private var micFill: Color { Color(white: 0.92) }
-    private var notchContentOpacity: Double {
-        max(0, min(1, viewModel.revealContentProgress))
-    }
 
     private func stopVoice() {
         speech.stopRecording()
@@ -391,9 +407,9 @@ struct JottCaptureView: View {
         HStack(spacing: 6) {
             Button { showHelp.toggle() } label: {
                 Text("?")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.white.opacity(0.28))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 22, height: 22)
                     .background(Color.white.opacity(0.06))
                     .clipShape(Circle())
             }
@@ -433,9 +449,9 @@ struct JottCaptureView: View {
             // Lock button — mirrors "?" on the left, always rightmost.
             Button { viewModel.isLocked.toggle() } label: {
                 Image(systemName: viewModel.isLocked ? "lock.fill" : "lock.open")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(viewModel.isLocked ? Color.jottOverlayPeachAccent : .white.opacity(0.28))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 22, height: 22)
                     .background(viewModel.isLocked ? Color.jottOverlayPeachAccent.opacity(0.15) : Color.white.opacity(0.06))
                     .clipShape(Circle())
             }
@@ -601,14 +617,14 @@ struct JottCaptureView: View {
             // ── Black notch panel ──────────────────────────────────────────
             VStack(spacing: 0) {
                 toolbarRow
-                    .opacity(notchContentOpacity)
+                    .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
 
                 JottInputArea(viewModel: viewModel,
                               showFormat: $showFormat,
                               dropdownVisible: showsDropdown && dropdownReady,
                               onToggleVoice: toggleVoice,
                               micInside: false)
-                    .opacity(notchContentOpacity)
+                    .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
                     .colorScheme(.dark)
             }
             .background(
@@ -624,11 +640,11 @@ struct JottCaptureView: View {
 
             // ── Dropdown — floats below input panel ────────────────────────
             dropdownSection
-                .opacity(notchContentOpacity)
+                .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
 
             // ── Floating actions ───────────────────────────────────────────
             floatingActions
-                .opacity(notchContentOpacity)
+                .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
 
             Spacer()
         }

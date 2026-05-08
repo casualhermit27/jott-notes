@@ -1,143 +1,110 @@
 import SwiftUI
 
 private struct NotchMorphVector: VectorArithmetic {
-    var width: Double = 0
-    var height: Double = 0
-    var corner: Double = 0
-    var bias: Double = 0
-    var content: Double = 0
+    var progress: Double = 0
     var exit: Double = 0
     var expandedHeight: Double = 0
+    var compactWidth: Double = 0
+    var compactHeight: Double = 0
 
     static var zero: NotchMorphVector { NotchMorphVector() }
 
-    static func + (lhs: NotchMorphVector, rhs: NotchMorphVector) -> NotchMorphVector {
-        NotchMorphVector(
-            width: lhs.width + rhs.width,
-            height: lhs.height + rhs.height,
-            corner: lhs.corner + rhs.corner,
-            bias: lhs.bias + rhs.bias,
-            content: lhs.content + rhs.content,
-            exit: lhs.exit + rhs.exit,
-            expandedHeight: lhs.expandedHeight + rhs.expandedHeight
-        )
+    static func + (l: NotchMorphVector, r: NotchMorphVector) -> NotchMorphVector {
+        NotchMorphVector(progress: l.progress + r.progress, exit: l.exit + r.exit,
+                         expandedHeight: l.expandedHeight + r.expandedHeight,
+                         compactWidth: l.compactWidth + r.compactWidth,
+                         compactHeight: l.compactHeight + r.compactHeight)
     }
-
-    static func - (lhs: NotchMorphVector, rhs: NotchMorphVector) -> NotchMorphVector {
-        NotchMorphVector(
-            width: lhs.width - rhs.width,
-            height: lhs.height - rhs.height,
-            corner: lhs.corner - rhs.corner,
-            bias: lhs.bias - rhs.bias,
-            content: lhs.content - rhs.content,
-            exit: lhs.exit - rhs.exit,
-            expandedHeight: lhs.expandedHeight - rhs.expandedHeight
-        )
+    static func - (l: NotchMorphVector, r: NotchMorphVector) -> NotchMorphVector {
+        NotchMorphVector(progress: l.progress - r.progress, exit: l.exit - r.exit,
+                         expandedHeight: l.expandedHeight - r.expandedHeight,
+                         compactWidth: l.compactWidth - r.compactWidth,
+                         compactHeight: l.compactHeight - r.compactHeight)
     }
-
-    static func += (lhs: inout NotchMorphVector, rhs: NotchMorphVector) {
-        lhs = lhs + rhs
-    }
-
-    static func -= (lhs: inout NotchMorphVector, rhs: NotchMorphVector) {
-        lhs = lhs - rhs
-    }
+    static func += (l: inout NotchMorphVector, r: NotchMorphVector) { l = l + r }
+    static func -= (l: inout NotchMorphVector, r: NotchMorphVector) { l = l - r }
 
     mutating func scale(by rhs: Double) {
-        width *= rhs
-        height *= rhs
-        corner *= rhs
-        bias *= rhs
-        content *= rhs
-        exit *= rhs
-        expandedHeight *= rhs
+        progress *= rhs; exit *= rhs; expandedHeight *= rhs
+        compactWidth *= rhs; compactHeight *= rhs
     }
-
     var magnitudeSquared: Double {
-        width * width
-        + height * height
-        + corner * corner
-        + bias * bias
-        + content * content
-        + exit * exit
-        + expandedHeight * expandedHeight
+        progress*progress + exit*exit + expandedHeight*expandedHeight
+        + compactWidth*compactWidth + compactHeight*compactHeight
     }
 }
 
 private struct NotchMorphShape: Shape {
-    var widthProgress: Double
-    var heightProgress: Double
-    var cornerProgress: Double
-    var surfaceBiasProgress: Double
-    var contentProgress: Double
-    var exitProgress: Double
+    var progress: Double        // 0 = compact, 1 = full panel (spring can overshoot slightly)
+    var exitProgress: Double    // 0→1 on close: drives lateral squish wobble
     var expandedHeight: CGFloat
+    var compactWidth: CGFloat
+    var compactHeight: CGFloat
 
-    private let notchW: CGFloat = 178
-    private let notchH: CGFloat = 32
     private let notchBottomR: CGFloat = 12
     private let panelBottomR: CGFloat = 8
     private let floatingControlsAllowance: CGFloat = 116
 
     var animatableData: NotchMorphVector {
-        get {
-            NotchMorphVector(
-                width: widthProgress,
-                height: heightProgress,
-                corner: cornerProgress,
-                bias: surfaceBiasProgress,
-                content: contentProgress,
-                exit: exitProgress,
-                expandedHeight: Double(expandedHeight)
-            )
-        }
+        get { NotchMorphVector(progress: progress, exit: exitProgress,
+                               expandedHeight: Double(expandedHeight),
+                               compactWidth: Double(compactWidth),
+                               compactHeight: Double(compactHeight)) }
         set {
-            widthProgress = newValue.width
-            heightProgress = newValue.height
-            cornerProgress = newValue.corner
-            surfaceBiasProgress = newValue.bias
-            contentProgress = newValue.content
+            progress = newValue.progress
             exitProgress = newValue.exit
             expandedHeight = CGFloat(newValue.expandedHeight)
+            compactWidth = CGFloat(newValue.compactWidth)
+            compactHeight = CGFloat(newValue.compactHeight)
         }
     }
 
     func path(in rect: CGRect) -> Path {
-        let widthUnit = clampedUnit(widthProgress)
-        let heightUnit = clampedUnit(heightProgress)
-        let cornerUnit = clampedUnit(cornerProgress)
-        let biasUnit = clampedUnit(surfaceBiasProgress)
-        let contentUnit = clampedUnit(contentProgress)
-        let exitUnit = clampedUnit(exitProgress)
+        let p = max(0, min(1.02, progress))     // allow spring overshoot
+        let pUnit = max(0, min(1, p))
+        let exitUnit = max(0, min(1, exitProgress))
 
-        let heightT = boundedProgress(heightProgress)
-        let rawWidthT = coupledWidthProgress(widthUnit: widthUnit, heightUnit: heightUnit)
-            + CGFloat(widthProgress - widthUnit)
-        let widthT = max(0, rawWidthT)
-        let cornerT = CGFloat(pow(cornerUnit * (1 - 0.10 * smoothstep(exitUnit)), 1.65))
-        let biasPeak = CGFloat(sin(.pi * heightUnit))
-        let transitionPeak = CGFloat(sin(.pi * min(1, max(0, (widthUnit + heightUnit) * 0.5))))
+        // Width leads height, corner lags — derived from a single progress value.
+        // The lag offsets replicate the old 0.045s / 0.075s spring delays.
+        let heightP = max(0, (pUnit - 0.05) / 0.95)   // ~0.045s lag at 0.4s settle time
+        let cornerP = max(0, (pUnit - 0.08) / 0.92)   // ~0.075s lag
+
+        let heightT = CGFloat(min(1.018, heightP))     // bounded overshoot for spring feel
+        let cornerT = CGFloat(pow(smoothstep(cornerP) * (1 - 0.10 * smoothstep(exitUnit)), 1.65))
+
+        // Width leads via coupling: eased width pulls ahead as height rises
+        let easedWidth = 1 - pow(1 - pUnit, 1.55)
+        let coupling   = 0.36 * smoothstep(heightP)
+        let rawWidthT  = CGFloat(pUnit + (easedWidth - pUnit) * coupling) + CGFloat(p - pUnit)
+        let widthT     = max(0, rawWidthT)
+
+        // Lateral wobble: peaks mid-transition, only active during exit squish
+        let transitionPeak = CGFloat(sin(.pi * min(1, max(0, (pUnit + heightP) * 0.5))))
         let micro = 0.12
-            * sin(CGFloat(widthUnit) * .pi * 2.0 + CGFloat(heightUnit) * .pi * 0.65)
+            * sin(CGFloat(pUnit) * .pi * 2.0 + CGFloat(heightP) * .pi * 0.65)
             * transitionPeak
+        let exitBias = CGFloat(exitUnit) * CGFloat(sin(.pi * pUnit))
+        let pull = (1.05 * exitBias + micro) * max(0, min(1, widthT))
 
+        let notchW = max(1, min(compactWidth, rect.width))
+        let notchH = max(1, min(compactHeight, rect.height))
         let w = notchW + (rect.width - notchW) * widthT
-        let contentPressure = 2.4 * CGFloat(smoothstep(contentUnit)) * CGFloat(smoothstep(heightUnit))
+        let contentPressure = 2.4 * heightT * heightT  // subtle height bulge when content loads
         let baseH = notchH + (min(expandedHeight, rect.height) - notchH) * heightT
         let h = min(baseH + floatingControlsAllowance * heightT + contentPressure, rect.height)
-        let pull = (1.05 * CGFloat(biasUnit) * biasPeak + micro) * max(0, min(1, widthT))
+
         let x = (rect.width - w) / 2 + pull
         let cornerStretch = 0.55 * transitionPeak * (1 - 0.48 * CGFloat(smoothstep(exitUnit)))
-        let br = min(notchBottomR + (panelBottomR - notchBottomR) * cornerT + cornerStretch, w / 2, h / 2)
-        let c = 0.447 + 0.04 * max(0, 1 - cornerT)
-        let topShoulderFlex = 0.62 * transitionPeak * (0.35 + 0.65 * CGFloat(widthUnit)) * (1 - 0.48 * CGFloat(smoothstep(exitUnit)))
+        let br = min(notchBottomR + (panelBottomR - notchBottomR) * cornerT + cornerStretch, w/2, h/2)
+        let c  = 0.447 + 0.04 * max(0, 1 - cornerT)
+        let topShoulderFlex  = 0.62 * transitionPeak * (0.35 + 0.65 * CGFloat(pUnit))
+                               * (1 - 0.48 * CGFloat(smoothstep(exitUnit)))
         let bottomDip = min(
             1.9,
-            (0.45 * CGFloat(smoothstep(heightUnit)) + 1.28 * transitionPeak)
-            * (0.72 + 0.28 * CGFloat(smoothstep(contentUnit)))
-            + micro
+            (0.45 * CGFloat(smoothstep(heightP)) + 1.28 * transitionPeak)
+            * (0.72 + 0.28 * heightT) + micro
         )
-        let bottomY = min(h + max(0, bottomDip), rect.height)
+        let bottomY  = min(h + max(0, bottomDip), rect.height)
         let topBleed = max(2.0, topShoulderFlex + 1.0)
 
         var path = Path()
@@ -145,70 +112,108 @@ private struct NotchMorphShape: Shape {
         path.addLine(to: CGPoint(x: x + w, y: -topBleed))
         path.addLine(to: CGPoint(x: x + w, y: topShoulderFlex))
         path.addLine(to: CGPoint(x: x + w, y: h - br))
-        path.addCurve(
-            to: CGPoint(x: x + w - br, y: h),
-            control1: CGPoint(x: x + w, y: h - br * c),
-            control2: CGPoint(x: x + w - br * c, y: h)
-        )
-        path.addCurve(
-            to: CGPoint(x: x + br, y: h),
-            control1: CGPoint(x: x + w * 0.66, y: bottomY),
-            control2: CGPoint(x: x + w * 0.34, y: bottomY)
-        )
-        path.addCurve(
-            to: CGPoint(x: x, y: h - br),
-            control1: CGPoint(x: x + br * c, y: h),
-            control2: CGPoint(x: x, y: h - br * c)
-        )
+        path.addCurve(to: CGPoint(x: x + w - br, y: h),
+                      control1: CGPoint(x: x + w, y: h - br * c),
+                      control2: CGPoint(x: x + w - br * c, y: h))
+        path.addCurve(to: CGPoint(x: x + br, y: h),
+                      control1: CGPoint(x: x + w * 0.66, y: bottomY),
+                      control2: CGPoint(x: x + w * 0.34, y: bottomY))
+        path.addCurve(to: CGPoint(x: x, y: h - br),
+                      control1: CGPoint(x: x + br * c, y: h),
+                      control2: CGPoint(x: x, y: h - br * c))
         path.addLine(to: CGPoint(x: x, y: topShoulderFlex))
         path.addLine(to: CGPoint(x: x, y: -topBleed))
         path.closeSubpath()
         return path
     }
 
-    private func clampedUnit(_ value: Double) -> Double {
-        max(0, min(1, value))
-    }
-
-    private func boundedProgress(_ value: Double) -> CGFloat {
-        CGFloat(max(0, min(1.018, value)))
-    }
-
     private func smoothstep(_ value: Double) -> Double {
-        let x = clampedUnit(value)
+        let x = max(0, min(1, value))
         return x * x * (3 - 2 * x)
     }
+}
 
-    private func coupledWidthProgress(widthUnit: Double, heightUnit: Double) -> CGFloat {
-        let easedWidth = 1 - pow(1 - widthUnit, 1.55)
-        let coupling = 0.36 * smoothstep(heightUnit)
-        return CGFloat(widthUnit + (easedWidth - widthUnit) * coupling)
+// Fades the pinned handoff icons out as the bar opens (0→45% progress),
+// and suppresses them entirely once the close animation starts.
+private struct PinnedHandoffModifier: ViewModifier, Animatable {
+    var progress: Double
+    var exitProgress: Double
+
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(progress, exitProgress) }
+        set { progress = newValue.first; exitProgress = newValue.second }
+    }
+
+    func body(content: Content) -> some View {
+        let t = max(0.0, min(1.0, progress / 0.45))
+        let openOpacity = 1.0 - t * t * (3 - 2 * t)
+        // Kill the overlay immediately when the close animation begins.
+        let exitSuppression = max(0.0, 1.0 - exitProgress * 8.0)
+        return content.opacity(openOpacity * exitSuppression)
     }
 }
 
 struct OverlayView: View {
     @ObservedObject var viewModel: OverlayViewModel
-    private var exitProgress: Double {
-        max(0, min(1, viewModel.revealExitProgress))
-    }
-    private var expandedSurfaceProgress: Double {
-        max(0, min(1, max(viewModel.revealWidthProgress, viewModel.revealHeightProgress)))
-    }
+
+    private var p: Double { max(0, min(1, viewModel.revealProgress)) }
     private var exitInfluence: Double {
-        exitProgress * expandedSurfaceProgress
+        max(0, min(1, viewModel.revealExitProgress)) * p
+    }
+
+    // Matches the collapsed pill layout: pin icon left, doc icon right.
+    // Shown at progress=0 when transitioning from pinned state, fades out by ~45%.
+    @ViewBuilder
+    private var pinnedHandoffContent: some View {
+        let pinPurple = Color(red: 0.70, green: 0.55, blue: 1.0)
+        HStack(spacing: 0) {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundColor(pinPurple.opacity(0.92))
+                .frame(width: 62, height: 34)
+            Spacer(minLength: 0)
+            Image(systemName: "doc.text")
+                .font(.system(size: 13, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundColor(.white.opacity(0.62))
+                .frame(width: 62, height: 34)
+        }
+        .frame(width: viewModel.revealCompactWidth, height: 34)
+        .allowsHitTesting(false)
     }
 
     var body: some View {
+        let morphShape = NotchMorphShape(
+            progress: viewModel.revealProgress,
+            exitProgress: viewModel.revealExitProgress,
+            expandedHeight: viewModel.overlayExpandedHeight,
+            compactWidth: viewModel.revealCompactWidth,
+            compactHeight: viewModel.revealCompactHeight
+        )
+
         UnifiedJottView(viewModel: viewModel)
-            .clipShape(NotchMorphShape(
-                widthProgress: viewModel.revealWidthProgress,
-                heightProgress: viewModel.revealHeightProgress,
-                cornerProgress: viewModel.revealCornerProgress,
-                surfaceBiasProgress: viewModel.revealSurfaceBiasProgress,
-                contentProgress: viewModel.revealContentProgress,
-                exitProgress: viewModel.revealExitProgress,
-                expandedHeight: viewModel.overlayExpandedHeight
-            ))
+            // Ambient occlusion: 3px gradient at top merges surface into menu bar hardware.
+            .overlay(alignment: .top) {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.22), .clear],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .frame(height: 3)
+                .allowsHitTesting(false)
+            }
+            // Pinned handoff: shows pill content at progress=0, fades as bar opens.
+            // Only active when a focused note triggered the open.
+            .overlay(alignment: .top) {
+                if viewModel.focusedNote != nil {
+                    pinnedHandoffContent
+                        .modifier(PinnedHandoffModifier(
+                            progress: viewModel.revealProgress,
+                            exitProgress: viewModel.revealExitProgress
+                        ))
+                }
+            }
+            .clipShape(morphShape)
             .scaleEffect(1 - 0.014 * exitInfluence, anchor: .top)
             .offset(y: -7 * CGFloat(exitInfluence))
             .opacity(1 - 0.14 * exitInfluence)

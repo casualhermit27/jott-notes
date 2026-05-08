@@ -5,6 +5,19 @@ import Combine
 // MARK: - Panel
 
 class FocusNotePanel: NSPanel {
+    private var suppressSwiftUIResize = false
+
+    // NSHostingView.updateAnimatedWindowSize calls setFrame during layout to resize
+    // the window to SwiftUI's content size preference. This creates an infinite loop:
+    // setFrame → layout → notification → windowDidLayout → updateAnimatedWindowSize → setFrame.
+    // All frame management is explicit via setFrame/animator; re-entrant calls are wrong.
+    override func setFrame(_ frameRect: NSRect, display displayFlag: Bool) {
+        guard !suppressSwiftUIResize else { return }
+        suppressSwiftUIResize = true
+        defer { suppressSwiftUIResize = false }
+        super.setFrame(frameRect, display: displayFlag)
+    }
+
     init() {
         super.init(
             contentRect: .zero,
@@ -38,6 +51,7 @@ class FocusNotePillController {
     private var cancellables = Set<AnyCancellable>()
     private var visibleFocusedNoteID: UUID?
     private var didPerformHoverHaptic = false
+    private var barToPillWorkItem: DispatchWorkItem?
 
     private let notchH:    CGFloat = 34
     private let sideW:     CGFloat = 62
@@ -54,9 +68,6 @@ class FocusNotePillController {
         hv.wantsLayer = true
         hv.translatesAutoresizingMaskIntoConstraints = true
         hv.autoresizingMask = [.width, .height]
-        if #available(macOS 13.0, *) {
-            hv.sizingOptions = []
-        }
         hosting = hv
         panel.contentView = hv
 
@@ -66,13 +77,40 @@ class FocusNotePillController {
 
         viewModel.$focusedNote
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] note in note != nil ? self?.showPill() : self?.hidePill() }
+            .sink { [weak self] note in
+                guard let self else { return }
+                if note == nil {
+                    self.hidePill()
+                } else if !self.viewModel.isVisible {
+                    self.showPill()
+                }
+            }
             .store(in: &cancellables)
+
+        // Bar-open is handled synchronously via viewModel.onWillShow (set below).
+        // This sink only handles bar-close → schedule pill return.
+        viewModel.$isVisible
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] barVisible in
+                guard let self else { return }
+                if !barVisible { self.schedulePillReturn() }
+            }
+            .store(in: &cancellables)
+
+        // Wire the synchronous handoff hook so show() can hide the pill before the
+        // overlay panel becomes visible — eliminating the async-tick gap.
+        viewModel.onWillShow = { [weak self] in
+            self?.hideForHandoff()
+        }
 
         pillState.$isExpanded
             .receive(on: DispatchQueue.main)
             .sink { [weak self] expanded in
-                guard let self, self.panel.alphaValue > 0 else { return }
+                guard let self else { return }
+                self.viewModel.pillIsExpanded = expanded
+                // Compact height: always notchH — expanded pill's top strip is 34px.
+                self.viewModel.pillCompactHeight = self.notchH
+                guard self.panel.alphaValue > 0 else { return }
                 self.animateFrame(
                     expanded: expanded,
                     duration: expanded ? 0.46 : 0.34
@@ -83,8 +121,9 @@ class FocusNotePillController {
         pillState.$isHovering
             .receive(on: DispatchQueue.main)
             .sink { [weak self] hovering in
-                guard let self, self.panel.alphaValue > 0,
-                      !self.pillState.isExpanded else { return }
+                guard let self else { return }
+                self.viewModel.pillCompactHeight = hovering ? self.hoverH : self.notchH
+                guard self.panel.alphaValue > 0, !self.pillState.isExpanded else { return }
                 if hovering && !self.didPerformHoverHaptic {
                     NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
                     self.didPerformHoverHaptic = true
@@ -92,6 +131,10 @@ class FocusNotePillController {
                     self.didPerformHoverHaptic = false
                 }
                 self.hosting?.needsLayout = true
+                self.animateFrame(
+                    duration: hovering ? 0.22 : 0.18,
+                    timing: CAMediaTimingFunction(controlPoints: 0.18, 0.86, 0.25, 1.0)
+                )
             }
             .store(in: &cancellables)
     }
@@ -155,11 +198,21 @@ class FocusNotePillController {
                 height: expandedH
             )
         } else {
-            return CGRect(x: collapsedX, y: sf.maxY - hoverH, width: collapsedW, height: hoverH)
+            let height = pillState.isHovering ? hoverH : notchH
+            return CGRect(x: collapsedX, y: sf.maxY - height, width: collapsedW, height: height)
         }
     }
 
-    private func showPill() {
+    // Called by OverlayWindowController before opening so the overlay clip starts
+    // at the real notch width instead of the default fallback.
+    func notchWidth() -> CGFloat {
+        notchMetrics()?.width ?? fallbackNotchW
+    }
+
+    private func showPill(fromBar: Bool = false) {
+        barToPillWorkItem?.cancel()
+        barToPillWorkItem = nil
+
         let noteID = viewModel.focusedNote?.id
         let isSameVisibleNote = panel.alphaValue > 0 && noteID == visibleFocusedNoteID
         visibleFocusedNoteID = noteID
@@ -172,21 +225,79 @@ class FocusNotePillController {
         didPerformHoverHaptic = false
         pillState.isExpanded = false
         pillState.isHovering = false
-        panel.setFrame(notchOnlyFrame(), display: false)
-        panel.alphaValue = 1
-        panel.orderFront(nil)
-        DispatchQueue.main.async { [weak self] in
-            self?.animateFrame(duration: 0.44, timing: CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.24, 1.0))
+
+        if fromBar {
+            let wasVisible = panel.alphaValue > 0
+            panel.setFrame(pillFrame(expanded: false), display: false)
+            panel.orderFront(nil)
+            if wasVisible {
+                // Pill was kept visible behind bar — just bring to front, no fade needed.
+                panel.alphaValue = 1
+            } else {
+                // Pill was hidden (expanded handoff case) — fade in.
+                panel.alphaValue = 0
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.14
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    self.panel.animator().alphaValue = 1
+                }
+            }
+        } else {
+            panel.setFrame(notchOnlyFrame(), display: false)
+            panel.alphaValue = 1
+            panel.orderFront(nil)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.animateFrame(duration: 0.44, timing: CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.24, 1.0))
+            }
         }
     }
 
     private func hidePill() {
+        barToPillWorkItem?.cancel()
+        barToPillWorkItem = nil
         visibleFocusedNoteID = nil
         didPerformHoverHaptic = false
         pillState.isExpanded = false
         pillState.isHovering = false
         panel.alphaValue = 0
         panel.orderOut(nil)
+    }
+
+    // Called synchronously from OverlayWindowController.show() before the overlay panel
+    // becomes visible. For compact pill: keep visible behind bar — bar at progress=0
+    // covers the exact same pixel footprint so there is no seam. For expanded pill:
+    // hide instantly since its footprint doesn't match the bar's compact start shape.
+    func hideForHandoff() {
+        barToPillWorkItem?.cancel()
+        barToPillWorkItem = nil
+        didPerformHoverHaptic = false
+        panel.setFrame(panel.frame, display: false)
+        pillState.isHovering = false
+
+        if pillState.isExpanded {
+            // Expanded pill — hide immediately; bar starts at matching expanded dims.
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+            pillState.isExpanded = false
+            visibleFocusedNoteID = nil
+        } else {
+            // Compact pill — keep visible. Bar opens on top, covering this surface.
+            // visibleFocusedNoteID kept so schedulePillReturn uses isSameVisibleNote path.
+            pillState.isExpanded = false
+        }
+    }
+
+    private func schedulePillReturn() {
+        barToPillWorkItem?.cancel()
+        // Close spring (mass 0.85, stiffness 305) settles by ~0.28s. Fade pill in at 0.30s.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.viewModel.isVisible,
+                  self.viewModel.focusedNote != nil else { return }
+            self.showPill(fromBar: true)
+        }
+        barToPillWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30, execute: work)
     }
 
     private func animateFrame(
@@ -214,9 +325,9 @@ private struct FocusPillView: View {
     @ObservedObject var pillState: FocusPillState
     let sideWidth: CGFloat
     @State private var controlsRevealed = false
+    @State private var textVisible = false
 
     private var topHeight: CGFloat { 34 }
-    private var collapsedSurfaceHeight: CGFloat { pillState.isHovering ? 70 : topHeight }
     private var pinPurple: Color { Color(red: 0.70, green: 0.55, blue: 1.0) }
     private var isCompact: Bool { !pillState.isExpanded }
 
@@ -225,11 +336,14 @@ private struct FocusPillView: View {
             ZStack(alignment: .topLeading) {
                 LiquidNotchSurface(
                     bottomRadius: pillState.isExpanded ? 18 : (pillState.isHovering ? 15 : 11),
-                    bottomBulge: pillState.isExpanded ? 0 : (pillState.isHovering ? 2.4 : 0.6)
+                    bottomBulge: pillState.isExpanded ? 0 : (pillState.isHovering ? 2.4 : 0)
                 )
                     .fill(Color.black)
-                    .frame(height: pillState.isExpanded ? proxy.size.height : collapsedSurfaceHeight)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    // Cap at proxy.size.height so rounded corners sit within the panel's
+                    // visible bounds. Without this, the ZStack's intrinsic height (from
+                    // collapsedContent's minHeight) exceeds the 34px panel and corners
+                    // render off-screen, appearing sharp.
+                    .frame(maxWidth: .infinity, maxHeight: proxy.size.height, alignment: .top)
                     .animation(.interpolatingSpring(mass: 0.92, stiffness: 170, damping: 27),
                                value: pillState.isExpanded)
                     .animation(.interpolatingSpring(mass: 0.82, stiffness: 185, damping: 29),
@@ -251,17 +365,22 @@ private struct FocusPillView: View {
             }
         }
         .compositingGroup()
-        .onAppear {
-            revealControls()
-        }
-        .onChange(of: viewModel.focusedNote?.id) { _, _ in
-            revealControls()
-        }
+        .onAppear { revealControls() }
+        .onChange(of: viewModel.focusedNote?.id) { _, _ in revealControls() }
         .colorScheme(.dark)
         .onHover { hovering in
             guard !pillState.isExpanded else { return }
             withAnimation(.interpolatingSpring(mass: 0.9, stiffness: 220, damping: 26)) {
                 pillState.isHovering = hovering
+            }
+        }
+        .onChange(of: pillState.isHovering) { _, hovering in
+            if hovering {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
+                    withAnimation(.easeOut(duration: 0.14)) { textVisible = true }
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.07)) { textVisible = false }
             }
         }
     }
@@ -273,7 +392,7 @@ private struct FocusPillView: View {
                     systemName: "pin.fill",
                     accessibilityLabel: "Unpin focus note",
                     color: pinPurple,
-                    opacity: 0.92,
+                    opacity: 0.92
                 )
                 .frame(width: sideWidth, height: topHeight)
                 .offset(x: controlsRevealed ? 0 : 16)
@@ -287,7 +406,7 @@ private struct FocusPillView: View {
                     systemName: "doc.text",
                     accessibilityLabel: "Open focus note",
                     color: .white,
-                    opacity: 0.62,
+                    opacity: 0.62
                 )
                 .frame(width: sideWidth, height: topHeight)
                 .offset(x: controlsRevealed ? 0 : -16)
@@ -308,8 +427,8 @@ private struct FocusPillView: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 30, alignment: .center)
-            .opacity(pillState.isHovering ? 1 : 0)
-            .offset(y: pillState.isHovering ? 0 : -6)
+            .opacity(textVisible ? 1 : 0)
+            .offset(y: textVisible ? 0 : -6)
             .allowsHitTesting(pillState.isHovering)
             .contentShape(Rectangle())
             .onTapGesture { expandFocusNote() }
@@ -338,7 +457,7 @@ private struct FocusPillView: View {
             .symbolRenderingMode(.hierarchical)
             .foregroundColor(color.opacity(opacity))
             .frame(width: sideWidth, height: topHeight)
-        .accessibilityLabel(accessibilityLabel)
+            .accessibilityLabel(accessibilityLabel)
     }
 
     private func expandFocusNote() {
@@ -380,6 +499,7 @@ private struct LiquidNotchSurface: Shape {
         let h = max(1, rect.height)
         let r = min(bottomRadius, w / 2, h / 2)
         let bulge = min(bottomBulge, max(0, h - r) / 2)
+        let bottomControlY = h - bulge
 
         var p = Path()
         p.move(to: .zero)
@@ -389,8 +509,8 @@ private struct LiquidNotchSurface: Shape {
                  startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
         p.addCurve(
             to: CGPoint(x: r, y: h),
-            control1: CGPoint(x: w * 0.68, y: h + bulge),
-            control2: CGPoint(x: w * 0.32, y: h + bulge)
+            control1: CGPoint(x: w * 0.68, y: bottomControlY),
+            control2: CGPoint(x: w * 0.32, y: bottomControlY)
         )
         p.addArc(center: CGPoint(x: r, y: h - r), radius: r,
                  startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
@@ -445,12 +565,14 @@ private struct FocusPillExpandedContent: View {
                 Spacer()
                 Button {
                     guard controlsEnabled else { return }
-                    pillState.isExpanded = false
+                    withAnimation(.interpolatingSpring(mass: 0.88, stiffness: 190, damping: 25)) {
+                        pillState.isExpanded = false
+                    }
                 } label: {
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.white.opacity(0.35))
-                        .frame(width: 18, height: 18)
+                        .frame(width: 22, height: 22)
                         .background(Color.white.opacity(0.08))
                         .clipShape(Circle())
                 }
@@ -461,9 +583,9 @@ private struct FocusPillExpandedContent: View {
                     viewModel.focusedNote = nil
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.white.opacity(0.35))
-                        .frame(width: 18, height: 18)
+                        .frame(width: 22, height: 22)
                         .background(Color.white.opacity(0.08))
                         .clipShape(Circle())
                 }
@@ -497,10 +619,9 @@ private struct FocusPillExpandedContent: View {
 
     private var subnotesSection: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("SUBNOTES")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.white.opacity(0.28))
-                .tracking(0.5)
+            Text("Subnotes")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.32))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
 
