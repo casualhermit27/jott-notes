@@ -130,7 +130,6 @@ class FocusNotePillController {
                 } else if !hovering {
                     self.didPerformHoverHaptic = false
                 }
-                self.hosting?.needsLayout = true
                 self.animateFrame(
                     duration: hovering ? 0.22 : 0.18,
                     timing: CAMediaTimingFunction(controlPoints: 0.18, 0.86, 0.25, 1.0)
@@ -297,7 +296,7 @@ class FocusNotePillController {
             self.showPill(fromBar: true)
         }
         barToPillWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36, execute: work)
     }
 
     private func animateFrame(
@@ -305,13 +304,22 @@ class FocusNotePillController {
         duration: TimeInterval = 0.28,
         timing: CAMediaTimingFunction = CAMediaTimingFunction(controlPoints: 0.18, 0.86, 0.25, 1.0)
     ) {
-        NSAnimationContext.runAnimationGroup { ctx in
+        // Suppress mouse events during the frame animation. Changing the panel bounds
+        // triggers SwiftUI tracking-area updates on every animation tick (because
+        // proxy.size.height drives the surface height), which fires spurious onHover
+        // enter/exit events and creates a hover oscillation loop.
+        panel.ignoresMouseEvents = true
+        NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = duration
             ctx.timingFunction = timing
             panel.animator().setFrame(pillFrame(expanded: expanded), display: true)
-        }
+        }, completionHandler: { [weak self] in
+            self?.panel.ignoresMouseEvents = false
+        })
     }
 }
+
+private let pillVoidBlack = Color(nsColor: NSColor(calibratedWhite: 0.015, alpha: 1.0))
 
 private final class FocusPillState: ObservableObject {
     @Published var isExpanded = false
@@ -328,6 +336,7 @@ private struct FocusPillView: View {
     @State private var textVisible = false
 
     private var topHeight: CGFloat { 34 }
+    private var collapsedSurfaceHeight: CGFloat { pillState.isHovering ? 70 : topHeight }
     private var pinPurple: Color { Color(red: 0.70, green: 0.55, blue: 1.0) }
     private var isCompact: Bool { !pillState.isExpanded }
 
@@ -338,19 +347,16 @@ private struct FocusPillView: View {
                     bottomRadius: pillState.isExpanded ? 18 : (pillState.isHovering ? 15 : 11),
                     bottomBulge: pillState.isExpanded ? 0 : (pillState.isHovering ? 2.4 : 0)
                 )
-                    .fill(Color.black)
-                    // Cap at proxy.size.height so rounded corners sit within the panel's
-                    // visible bounds. Without this, the ZStack's intrinsic height (from
-                    // collapsedContent's minHeight) exceeds the 34px panel and corners
-                    // render off-screen, appearing sharp.
-                    .frame(maxWidth: .infinity, maxHeight: proxy.size.height, alignment: .top)
+                    .fill(pillVoidBlack)
+                    .frame(height: pillState.isExpanded ? proxy.size.height : collapsedSurfaceHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .animation(.interpolatingSpring(mass: 0.92, stiffness: 170, damping: 27),
                                value: pillState.isExpanded)
                     .animation(.interpolatingSpring(mass: 0.82, stiffness: 185, damping: 29),
                                value: pillState.isHovering)
 
                 Rectangle()
-                    .fill(Color.black)
+                    .fill(pillVoidBlack)
                     .frame(height: 3)
                     .frame(maxWidth: .infinity, alignment: .top)
                     .allowsHitTesting(false)

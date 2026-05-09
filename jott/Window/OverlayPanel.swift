@@ -15,6 +15,13 @@ class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     // updateAnimatedWindowSize during layout, which otherwise creates an infinite
     // layout-pass loop in AppKit (too many constraint update passes).
     override var intrinsicContentSize: NSSize { .zero }
+
+    // NSHostingView.windowDidLayout calls updateAnimatedWindowSize, which calls
+    // setFrame on our explicitly-managed panel. During an active layout pass this
+    // triggers KVO → constraint invalidation → another layout pass → crash
+    // ("too many Update Constraints passes"). We manage all frames explicitly so
+    // updateAnimatedWindowSize must never run.
+    @objc func windowDidLayout() {}
 }
 
 class OverlayPanel: NSPanel {

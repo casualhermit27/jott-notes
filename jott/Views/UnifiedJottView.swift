@@ -4,23 +4,16 @@ import Combine
 import EventKit
 
 // Near-black surface (#0A0A0A). Pure black creates too-hard edge contrast against bright wallpapers.
-private let jottNotchVoidBlack = Color(nsColor: NSColor(deviceWhite: 0.04, alpha: 1.0))
+private let jottNotchVoidBlack = Color(nsColor: NSColor(calibratedWhite: 0.015, alpha: 1.0))
 
-// Content opacity tied directly to the morph spring via Animatable.
-// SwiftUI calls body(content:) with the per-frame interpolated progress value,
-// so content genuinely resolves out of the expanding surface rather than cross-fading independently.
-private struct ContentRevealModifier: ViewModifier, Animatable {
-    var progress: Double
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
-    }
+// Fades content in when the bar is open (contentVisible = true at 170ms after open)
+// and hides it instantly on close.
+private struct ContentRevealModifier: ViewModifier {
+    var visible: Bool
     func body(content: Content) -> some View {
-        // Content fades in from ~42% open so it overlaps slightly with
-        // the pinned handoff icons fading out (which finish by ~45%).
-        let x = max(0.0, min(1.0, (progress - 0.42) / 0.58))
-        let opacity = x * x * (3 - 2 * x)  // smoothstep
-        return content.opacity(opacity)
+        content
+            .opacity(visible ? 1 : 0)
+            .animation(.easeOut(duration: 0.18), value: visible)
     }
 }
 
@@ -617,14 +610,14 @@ struct JottCaptureView: View {
             // ── Black notch panel ──────────────────────────────────────────
             VStack(spacing: 0) {
                 toolbarRow
-                    .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
+                    .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
 
                 JottInputArea(viewModel: viewModel,
                               showFormat: $showFormat,
                               dropdownVisible: showsDropdown && dropdownReady,
                               onToggleVoice: toggleVoice,
                               micInside: false)
-                    .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
+                    .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
                     .colorScheme(.dark)
             }
             .background(
@@ -640,11 +633,11 @@ struct JottCaptureView: View {
 
             // ── Dropdown — floats below input panel ────────────────────────
             dropdownSection
-                .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
+                .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
 
             // ── Floating actions ───────────────────────────────────────────
             floatingActions
-                .modifier(ContentRevealModifier(progress: viewModel.revealProgress))
+                .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
 
             Spacer()
         }

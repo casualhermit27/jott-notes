@@ -69,20 +69,16 @@ final class OverlayViewModel: ObservableObject {
     // becomes visible — hides the pill in the same rendering pass as the overlay appearing.
     var onWillShow: (() -> Void)? = nil
 
-    // Notch morph reveal: 0 = compact (notch/pill size), 1 = full panel.
-    // Width leads height, corners lag — all derived internally by NotchMorphShape from revealProgress.
-    @Published var revealProgress: Double = 0
-    @Published var revealExitProgress: Double = 0      // 0→1 on close: drives squish wobble
-    @Published var revealCompactWidth: CGFloat = 178
-    @Published var revealCompactHeight: CGFloat = 32
-
-    // Content opacity derived from revealProgress — no separate published property.
-    // UnifiedJottView reads this; ContentRevealModifier applies it with per-frame Animatable
-    // interpolation so content genuinely resolves from the surface rather than fading independently.
-    var revealContentProgress: Double {
-        let x = max(0.0, (revealProgress - 0.52) / 0.48)
-        return x * x * (3 - 2 * x)   // smoothstep: content appears in the last 48% of open
-    }
+    // Three independently animated shape properties.
+    // Width springs immediately on open; height + radius follow 60ms later (staggered inhale).
+    // Close uses cubic-bezier easing — no exit decoration, shape collapses decisively.
+    @Published var morphWidth:  CGFloat = 178
+    @Published var morphHeight: CGFloat = 32
+    @Published var morphRadius: CGFloat = 11
+    // Flipped true at 170ms after open, false instantly on close.
+    @Published var contentVisible: Bool = false
+    // Pill handoff icon layout — set from pill dimensions before show() animates.
+    var revealCompactWidth: CGFloat = 178
 
     // Note editing
     @Published var isEditingNote: Bool = false

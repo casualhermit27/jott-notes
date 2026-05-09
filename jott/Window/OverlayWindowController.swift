@@ -10,25 +10,28 @@ class OverlayWindowController {
     private var dismissWorkItem: DispatchWorkItem?
     private var escMonitor: Any?
 
-    // Notch drop panel - fixed content width, anchored at top-center.
-    private let panelHeight: CGFloat = 640
-    private let notchPanelWidth: CGFloat = 460
-    private let defaultCompactWidth: CGFloat = 178
+    // Panel is always 460×640, centered on notch. Clip shape animates within it.
+    private let panelHeight:          CGFloat = 640
+    private let notchPanelWidth:      CGFloat = 460
+    private let defaultCompactWidth:  CGFloat = 178
     private let defaultCompactHeight: CGFloat = 32
+    // Extra height below the bar's visual bottom to keep Aa/mic buttons unclipped.
+    private let floatingAllowance:    CGFloat = 116
 
-    // One spring for open, one for close.
-    // Everything — width, height, corners, content opacity — is derived from revealProgress alone.
-    private let openSpring = Animation.interpolatingSpring(
-        mass: 1.0, stiffness: 185, damping: 24, initialVelocity: 0.4
+    // Open: staggered springs. Width fires immediately, height+radius follow 60ms later.
+    // Close: cubic-bezier [0.22, 0, 0, 1] over 420ms — decisive collapse, no bounce.
+    private let openSpring  = Animation.interpolatingSpring(
+        mass: 1.0, stiffness: 130, damping: 21, initialVelocity: 1.0
     )
-    private let closeSpring = Animation.interpolatingSpring(
-        mass: 0.85, stiffness: 305, damping: 33, initialVelocity: 0
-    )
+    private let closeEasing = Animation.timingCurve(0.22, 0, 0, 1, duration: 0.42)
+
+    // Last height we animated to — used to skip no-op updates while the bar is open.
+    private var lastExpandedHeight: CGFloat = 0
 
     var isDarkMode: Bool { viewModel.isDarkMode }
 
     init() {
-        self.panel  = OverlayPanel()
+        self.panel     = OverlayPanel()
         self.viewModel = OverlayViewModel()
 
         let hostingView = FirstMouseHostingView(rootView: OverlayView(viewModel: viewModel))
@@ -54,6 +57,25 @@ class OverlayWindowController {
         viewModel.$isLocked
             .receive(on: DispatchQueue.main)
             .sink { OverlayPanel.isLocked = $0 }
+            .store(in: &cancellables)
+
+        // Animate morphHeight when overlayExpandedHeight changes while open.
+        // DispatchQueue.main.async reads the value AFTER the @Published change propagates.
+        viewModel.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          self.viewModel.isVisible,
+                          self.viewModel.contentVisible else { return }
+                    let newH = self.viewModel.overlayExpandedHeight + self.floatingAllowance
+                    guard abs(newH - self.lastExpandedHeight) > 1 else { return }
+                    self.lastExpandedHeight = newH
+                    withAnimation(.interpolatingSpring(mass: 0.9, stiffness: 200, damping: 26)) {
+                        self.viewModel.morphHeight = newH
+                    }
+                }
+            }
             .store(in: &cancellables)
 
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -109,44 +131,57 @@ class OverlayWindowController {
         hostingView?.layer?.removeAllAnimations()
         hostingView?.layer?.transform = CATransform3DIdentity
 
+        let targetWidth  = notchPanelWidth
+        let targetHeight = viewModel.overlayExpandedHeight + floatingAllowance
+        lastExpandedHeight = targetHeight
+
         if viewModel.focusedNote != nil {
             let notchW = handoffNotchWidth()
-            let sideW: CGFloat = 62       // matches FocusNotePillController.sideW
-            let pillCollapsedW = notchW + sideW * 2
-            let pillExpandedW: CGFloat = 370  // matches FocusNotePillController.expandedW
+            let sideW: CGFloat  = 62
+            let pillCollapsedW  = notchW + sideW * 2
+            let pillExpandedW:   CGFloat = 370
 
-            // Read pill state before onWillShow resets it.
             let startWidth  = viewModel.pillIsExpanded ? pillExpandedW : pillCollapsedW
-            let startHeight = viewModel.pillCompactHeight  // 34 normal, 70 if hovering
+            let startHeight = viewModel.pillCompactHeight
 
-            // Hide pill synchronously — same rendering pass, zero async gap.
             viewModel.onWillShow?()
 
-            viewModel.revealCompactWidth  = startWidth
-            viewModel.revealCompactHeight = startHeight
+            viewModel.revealCompactWidth = startWidth
+            viewModel.morphWidth  = startWidth
+            viewModel.morphHeight = startHeight
+            viewModel.morphRadius = 11
         } else {
-            viewModel.revealCompactWidth  = defaultCompactWidth
-            viewModel.revealCompactHeight = defaultCompactHeight
+            viewModel.morphWidth  = defaultCompactWidth
+            viewModel.morphHeight = defaultCompactHeight
+            viewModel.morphRadius = 11
         }
-
-        viewModel.revealProgress     = 0
-        viewModel.revealExitProgress = 0
+        viewModel.contentVisible = false
 
         panel.setFrame(panelFrame(), display: false)
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
 
-        // Single spring drives everything: shape morph, content reveal, shadows.
-        // No chained animations, no separate phases.
+        // Width springs open immediately — shape inhales.
         withAnimation(openSpring) {
-            viewModel.revealProgress = 1
+            viewModel.morphWidth = targetWidth
+        }
+        // Height + radius follow 60ms later.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+            guard let self else { return }
+            withAnimation(self.openSpring) {
+                self.viewModel.morphHeight = targetHeight
+                self.viewModel.morphRadius = 8
+            }
+        }
+        // Content appears at 170ms — shape has started expanding, never mid-morph.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in
+            self?.viewModel.contentVisible = true
         }
 
-        DispatchQueue.main.async { [weak self] in self?.focusTextView() }
+        DispatchQueue.main.async         { [weak self] in self?.focusTextView() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.focusTextView() }
     }
 
-    // Same notch detection logic as FocusNotePillController. Fallback matches fallbackNotchW=154.
     private func handoffNotchWidth() -> CGFloat {
         if #available(macOS 12.0, *),
            let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }),
@@ -171,31 +206,37 @@ class OverlayWindowController {
     func dismiss() {
         dismissWorkItem?.cancel()
 
-        // Snap compact target to pill's collapsed landing state (invisible while bar is open).
+        let compactW: CGFloat
+        let compactH: CGFloat
         if viewModel.focusedNote != nil {
-            let notchW = handoffNotchWidth()
-            let sideW: CGFloat  = 62   // matches FocusNotePillController.sideW
-            let notchH: CGFloat = 34   // matches FocusNotePillController.notchH
-            viewModel.revealCompactWidth  = notchW + sideW * 2
-            viewModel.revealCompactHeight = notchH
+            let notchW: CGFloat = handoffNotchWidth()
+            let sideW:  CGFloat = 62
+            compactW = notchW + sideW * 2
+            compactH = 34
+        } else {
+            compactW = defaultCompactWidth
+            compactH = defaultCompactHeight
         }
 
-        withAnimation(closeSpring) {
-            viewModel.revealProgress     = 0
-            viewModel.revealExitProgress = 1
+        // Content hidden immediately — pill re-appears 360ms after close starts.
+        viewModel.contentVisible = false
+
+        withAnimation(closeEasing) {
+            viewModel.morphWidth  = compactW
+            viewModel.morphHeight = compactH
+            viewModel.morphRadius = 11
         }
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.viewModel.revealProgress        = 0
-            self.viewModel.revealExitProgress    = 0
-            self.viewModel.revealCompactWidth    = self.defaultCompactWidth
-            self.viewModel.revealCompactHeight   = self.defaultCompactHeight
+            self.viewModel.morphWidth    = self.defaultCompactWidth
+            self.viewModel.morphHeight   = self.defaultCompactHeight
+            self.viewModel.morphRadius   = 11
             self.panel.alphaValue = 0
             self.panel.orderOut(nil)
         }
         dismissWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.44, execute: workItem)
     }
 
     func toggle() { viewModel.toggle() }
