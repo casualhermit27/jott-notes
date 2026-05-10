@@ -334,9 +334,11 @@ private struct FocusPillView: View {
     let sideWidth: CGFloat
     @State private var controlsRevealed = false
     @State private var textVisible = false
+    @State private var shapeRadius: CGFloat = 16
+    @State private var shapeBulge: CGFloat = 0
+    @State private var shapeHeight: CGFloat = 34
 
     private var topHeight: CGFloat { 34 }
-    private var collapsedSurfaceHeight: CGFloat { pillState.isHovering ? 70 : topHeight }
     private var pinPurple: Color { Color(red: 0.70, green: 0.55, blue: 1.0) }
     private var isCompact: Bool { !pillState.isExpanded }
 
@@ -344,16 +346,14 @@ private struct FocusPillView: View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
                 LiquidNotchSurface(
-                    bottomRadius: pillState.isExpanded ? 18 : (pillState.isHovering ? 15 : 11),
-                    bottomBulge: pillState.isExpanded ? 0 : (pillState.isHovering ? 2.4 : 0)
+                    bottomRadius: shapeRadius,
+                    bottomBulge: shapeBulge
                 )
                     .fill(pillVoidBlack)
-                    .frame(height: pillState.isExpanded ? proxy.size.height : collapsedSurfaceHeight)
+                    .frame(height: pillState.isExpanded ? proxy.size.height : shapeHeight)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .animation(.interpolatingSpring(mass: 0.92, stiffness: 170, damping: 27),
                                value: pillState.isExpanded)
-                    .animation(.interpolatingSpring(mass: 0.82, stiffness: 185, damping: 29),
-                               value: pillState.isHovering)
 
                 Rectangle()
                     .fill(pillVoidBlack)
@@ -382,11 +382,32 @@ private struct FocusPillView: View {
         }
         .onChange(of: pillState.isHovering) { _, hovering in
             if hovering {
+                // Match NSAnimationContext hover-in: duration 0.22s, same bezier.
+                withAnimation(.timingCurve(0.18, 0.86, 0.25, 1.0, duration: 0.22)) {
+                    shapeRadius = 20
+                    shapeBulge  = 2.4
+                    shapeHeight = 70
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
                     withAnimation(.easeOut(duration: 0.14)) { textVisible = true }
                 }
             } else {
-                withAnimation(.easeOut(duration: 0.07)) { textVisible = false }
+                // Match NSAnimationContext hover-out: duration 0.18s, same bezier.
+                // Hide text instantly so the collapsing surface clips cleanly — no
+                // tall empty surface with mid-animation corners.
+                textVisible = false
+                withAnimation(.timingCurve(0.18, 0.86, 0.25, 1.0, duration: 0.18)) {
+                    shapeRadius = 16
+                    shapeBulge  = 0
+                    shapeHeight = 34
+                }
+            }
+        }
+        .onChange(of: pillState.isExpanded) { _, expanded in
+            withAnimation(.interpolatingSpring(mass: 0.92, stiffness: 170, damping: 27)) {
+                shapeRadius = expanded ? 22 : (pillState.isHovering ? 20 : 16)
+                shapeBulge  = expanded ? 0  : (pillState.isHovering ? 2.4 : 0)
+                shapeHeight = expanded ? 34 : (pillState.isHovering ? 70 : 34)
             }
         }
     }
@@ -532,16 +553,29 @@ private struct FocusPillExpandedContent: View {
     @ObservedObject var pillState: FocusPillState
     let sideWidth: CGFloat
     @State private var editingBlocks: [Block] = []
-    @State private var newSubnoteText: String = ""
     @State private var saveTask: Task<Void, Never>?
     @State private var controlsEnabled = false
+    @State private var showFormat = false
+    @ObservedObject private var speech = SpeechManager.shared
+    @State private var voicePrefix = ""
 
     private let pinPurple = Color(red: 0.70, green: 0.55, blue: 1.0)
     private let topHeight: CGFloat = 34
     private var note: Note? { viewModel.focusedNote }
-    private var subnotes: [Note] {
-        guard let note else { return [] }
-        return viewModel.subnotes(of: note.id)
+
+    private var textBlocks: Binding<[Block]> {
+        Binding(
+            get: { editingBlocks.filter { $0.type != .table } },
+            set: { newText in
+                var merged = newText
+                merged.append(contentsOf: editingBlocks.filter { $0.type == .table })
+                editingBlocks = merged
+            }
+        )
+    }
+
+    private var tableIndices: [Int] {
+        editingBlocks.indices.filter { editingBlocks[$0].type == .table }
     }
 
     var body: some View {
@@ -552,9 +586,7 @@ private struct FocusPillExpandedContent: View {
                     .symbolRenderingMode(.hierarchical)
                     .foregroundColor(pinPurple.opacity(0.92))
                     .frame(width: sideWidth, height: topHeight)
-
                 Spacer(minLength: 0)
-
                 Image(systemName: "doc.text")
                     .font(.system(size: 13, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
@@ -603,14 +635,50 @@ private struct FocusPillExpandedContent: View {
 
             Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
 
-            LibraryNoteTextEditor(blocks: $editingBlocks, isDark: true)
-                .frame(maxWidth: .infinity, minHeight: 180)
-                .padding(.horizontal, 4)
-                .onChange(of: editingBlocks) { _, newBlocks in scheduleAutoSave(blocks: newBlocks) }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 8) {
+                    LibraryNoteTextEditor(blocks: textBlocks, isDark: true)
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                    ForEach(tableIndices, id: \.self) { i in
+                        LibraryStoredTableEditor(block: $editingBlocks[i])
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .onChange(of: editingBlocks) { _, newBlocks in scheduleAutoSave(blocks: newBlocks) }
 
             Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
 
-            subnotesSection
+            VStack(spacing: 0) {
+                if showFormat {
+                    PillFormatBar(blocks: $editingBlocks)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .padding(.bottom, 4)
+                }
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) {
+                            showFormat.toggle()
+                        }
+                    } label: {
+                        Text("Aa")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(showFormat ? .white : .white.opacity(0.50))
+                            .frame(width: 46, height: 32)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.06))
+                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
+                            )
+                    }
+                    .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.90, pressedOpacity: 0.94))
+                    Spacer()
+                    pillMicButton
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
         }
         .onAppear {
             editingBlocks = note?.blocks ?? []
@@ -623,43 +691,40 @@ private struct FocusPillExpandedContent: View {
         .onChange(of: viewModel.focusedNote?.id) { _, _ in editingBlocks = note?.blocks ?? [] }
     }
 
-    private var subnotesSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Subnotes")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.32))
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-
-            ForEach(subnotes.prefix(3)) { subnote in
+    @ViewBuilder private var pillMicButton: some View {
+        if speech.isRecording {
+            Button(action: stopVoice) {
                 HStack(spacing: 6) {
-                    Circle().fill(Color.white.opacity(0.18)).frame(width: 3, height: 3)
-                    Text(subnoteTitle(subnote))
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.6))
-                        .lineLimit(1)
+                    VoiceWaveformPill(level: speech.audioLevel)
+                        .frame(width: 40, height: 18)
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.82))
                 }
+                .frame(height: 32)
                 .padding(.horizontal, 12)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
+                )
             }
-            if subnotes.count > 3 {
-                Text("+\(subnotes.count - 3) more")
-                    .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.28))
-                    .padding(.horizontal, 12)
+            .buttonStyle(.plain)
+            .transition(.opacity.animation(.easeInOut(duration: 0.08)))
+        } else {
+            Button(action: toggleVoice) {
+                Image(systemName: "microphone.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.50))
+                    .frame(width: 34, height: 32)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.06))
+                            .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
+                    )
             }
-
-            HStack(spacing: 6) {
-                Image(systemName: "plus")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.28))
-                TextField("New subnote...", text: $newSubnoteText)
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.7))
-                    .textFieldStyle(.plain)
-                    .onSubmit { commitSubnote() }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.90, pressedOpacity: 0.94))
+            .transition(.opacity.animation(.easeInOut(duration: 0.08)))
         }
     }
 
@@ -670,11 +735,34 @@ private struct FocusPillExpandedContent: View {
             ?? "Focus Note"
     }
 
-    private func subnoteTitle(_ subnote: Note) -> String {
-        subnote.blocks
-            .first(where: { !$0.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
-            .plainText.trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Untitled"
+    private func toggleVoice() {
+        if speech.isRecording {
+            stopVoice()
+        } else {
+            voicePrefix = ""
+            speech.startRecording(
+                onPartial: { partial in appendVoiceText(partial, isFinal: false) },
+                onFinal: { final in
+                    appendVoiceText(final, isFinal: true)
+                    voicePrefix = ""
+                }
+            )
+        }
+    }
+
+    private func stopVoice() {
+        speech.stopRecording()
+        voicePrefix = ""
+    }
+
+    private func appendVoiceText(_ text: String, isFinal: Bool) {
+        guard !text.isEmpty else { return }
+        if let lastIdx = editingBlocks.indices.last, editingBlocks[lastIdx].type == .paragraph {
+            let prefix = voicePrefix.isEmpty ? "" : voicePrefix + " "
+            editingBlocks[lastIdx].spans = [TextSpan(prefix + text)]
+        } else {
+            editingBlocks.append(Block(type: .paragraph, spans: [TextSpan(text)]))
+        }
     }
 
     private func scheduleAutoSave(blocks: [Block]) {
@@ -688,11 +776,113 @@ private struct FocusPillExpandedContent: View {
             }
         }
     }
+}
 
-    private func commitSubnote() {
-        let text = newSubnoteText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let note else { return }
-        viewModel.createSubnote(parentId: note.id, text: text)
-        newSubnoteText = ""
+// MARK: - Pill format bar
+
+private struct PillFormatBar: View {
+    @Binding var blocks: [Block]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            fmtGroup {
+                btn("B", bold: true)   { apply(.bold) }
+                btn("I", italic: true) { apply(.italic) }
+                btn("U", underline: true) { apply(.underline) }
+                btn("S", strike: true) { apply(.strikethrough) }
+            }
+            sep
+            fmtGroup {
+                icon("list.bullet") { apply(.bulletList) }
+                icon("list.number") { apply(.numberedList) }
+                icon("checklist")   { apply(.taskList) }
+                icon("text.quote")  { apply(.quote) }
+            }
+            sep
+            fmtGroup {
+                icon("chevron.left.forwardslash.chevron.right") { apply(.inlineCode) }
+                icon("textformat.size") { apply(.heading) }
+                tableMenu
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+    }
+
+    private func fmtGroup<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+        HStack(spacing: 1) { c() }
+    }
+
+    private var sep: some View {
+        Rectangle().fill(Color.white.opacity(0.15)).frame(width: 1, height: 13).padding(.horizontal, 3)
+    }
+
+    private var tableMenu: some View {
+        Menu {
+            Button("2 x 2") { insertTable(rows: 2, columns: 2) }
+            Button("3 x 3") { insertTable(rows: 3, columns: 3) }
+            Button("4 x 4") { insertTable(rows: 4, columns: 4) }
+            Button("6 x 4") { insertTable(rows: 4, columns: 6) }
+        } label: {
+            Image(systemName: "tablecells")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.60))
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func insertTable(rows: Int, columns: Int) {
+        blocks.append(JottDraftTable(rows: rows, columns: columns).block)
+    }
+
+    private func apply(_ command: JottTextFormatCommand) {
+        if let handler = JottTextFormattingRegistry.libraryFormatHandler,
+           JottTextFormattingRegistry.activeTextView?.window != nil {
+            if handler(command) { return }
+        }
+        if blocks.isEmpty {
+            blocks.append(Block(type: .paragraph, spans: [TextSpan("")]))
+        }
+        switch command {
+        case .bulletList:   blocks[0].type = .bulletItem
+        case .numberedList: blocks[0].type = .numberedItem
+        case .taskList:     blocks[0].type = .taskItem;   blocks[0].checked = false
+        case .quote:        blocks[0].type = .quote
+        case .heading:      blocks[0].type = .heading;    blocks[0].level = 1
+        default: break
+        }
+    }
+
+    private func btn(_ label: String, bold: Bool = false, italic: Bool = false,
+                     underline: Bool = false, strike: Bool = false,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Group {
+                if bold      { Text(label).bold() }
+                else if italic   { Text(label).italic() }
+                else if underline { Text(label).underline() }
+                else if strike   { Text(label).strikethrough() }
+                else             { Text(label) }
+            }
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.70))
+            .frame(width: 26, height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.92, pressedOpacity: 0.9))
+    }
+
+    private func icon(_ name: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.70))
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.92, pressedOpacity: 0.9))
     }
 }

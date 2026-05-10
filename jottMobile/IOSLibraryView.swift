@@ -30,6 +30,9 @@ struct IOSLibraryView: View {
 
     @State private var searchText = ""
     @State private var activeFilter: IOSLibraryFilter = .none
+    @State private var isEditMode = false
+    @State private var selectedNoteIDs: Set<UUID> = []
+
     @State private var folderStack: [UUID] = []
     @State private var searchResults: [SearchResult] = []
     @State private var showNewNote = false
@@ -88,7 +91,7 @@ struct IOSLibraryView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                 }
-
+                
                 // Folder chips
                 let subfolders = noteStore.folders.filter { $0.parentId == activeFolderID }
                 if !subfolders.isEmpty && !isSearching && !isRecentlyDeleted {
@@ -116,6 +119,8 @@ struct IOSLibraryView: View {
                             note: note,
                             subnoteCount: noteStore.subnoteCount(of: note.id),
                             isSelected: selectedNote?.id == note.id,
+                            isEditMode: isEditMode,
+                            isMultiSelected: selectedNoteIDs.contains(note.id),
                             searchQuery: searchText,
                             ds: ds
                         )
@@ -123,8 +128,47 @@ struct IOSLibraryView: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .onTapGesture {
+                            if isEditMode {
+                                if selectedNoteIDs.contains(note.id) {
+                                    selectedNoteIDs.remove(note.id)
+                                } else {
+                                    selectedNoteIDs.insert(note.id)
+                                }
+                            } else {
+                                selectedNote = note
+                            }
+                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             swipeButtons(for: note)
+                        }
+                        .contextMenu {
+                            Button {
+                                noteStore.togglePin(note.id)
+                            } label: {
+                                Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
+                            }
+                            
+                            Menu {
+                                Button("Remove from Folder") {
+                                    noteStore.moveNote(note.id, toFolder: nil)
+                                }
+                                Divider()
+                                ForEach(noteStore.folders) { folder in
+                                    Button(folder.name) {
+                                        noteStore.moveNote(note.id, toFolder: folder.id)
+                                    }
+                                }
+                            } label: {
+                                Label("Move to Folder", systemImage: "folder")
+                            }
+                            
+                            Button(role: .destructive) {
+                                noteStore.deleteNote(note.id)
+                                if selectedNote?.id == note.id { selectedNote = nil }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
                     // Bottom padding row so FAB doesn't cover last card
@@ -299,6 +343,48 @@ struct IOSLibraryView: View {
     }
 
     @ViewBuilder
+    private func folderGrid(_ folders: [NoteFolder]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            ForEach(folders) { folder in
+                Button {
+                    withAnimation(JottMotion.content) { folderStack.append(folder.id) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(folder.displayColor)
+                        Text(folder.name)
+                            .font(.jottBody(14, weight: .semibold))
+                            .foregroundColor(ds.ink)
+                            .lineLimit(1)
+                        Text("\(noteStore.allNotes().filter { $0.folderId == folder.id }.count) notes")
+                            .font(.jottCaption(11))
+                            .foregroundColor(ds.inkFaint)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ds.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ds.hairline, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        renameText = folder.name
+                        folderToRename = folder
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        folderToDelete = folder
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func folderChipsRow(_ folders: [NoteFolder]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -432,6 +518,21 @@ struct IOSLibraryView: View {
             }
         }
         ToolbarItem(placement: .navigationBarTrailing) {
+            if isEditMode && !selectedNoteIDs.isEmpty {
+                Button(role: .destructive) {
+                    for id in selectedNoteIDs {
+                        noteStore.deleteNote(id)
+                    }
+                    selectedNoteIDs.removeAll()
+                    isEditMode = false
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        ToolbarItem(placement: .navigationBarTrailing) {
             Menu {
                 filterMenuItems
             } label: {
@@ -450,10 +551,21 @@ struct IOSLibraryView: View {
             }
         }
         ToolbarItem(placement: .navigationBarLeading) {
-            Button { showSettings = true } label: {
-                Image(systemName: "gear")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(ds.inkMute)
+            HStack(spacing: 12) {
+                Button { showSettings = true } label: {
+                    Image(systemName: "gear")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(ds.inkMute)
+                }
+                
+                Button {
+                    isEditMode.toggle()
+                    if !isEditMode { selectedNoteIDs.removeAll() }
+                } label: {
+                    Text(isEditMode ? "Done" : "Edit")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(ds.accent)
+                }
             }
         }
     }
@@ -569,6 +681,8 @@ private struct NoteCard: View {
     let note: Note
     let subnoteCount: Int
     let isSelected: Bool
+    let isEditMode: Bool
+    let isMultiSelected: Bool
     var searchQuery: String = ""
     let ds: JottDS
 
@@ -576,114 +690,123 @@ private struct NoteCard: View {
     private var isSearching: Bool { !searchQuery.isEmpty }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            // Depth layers for notes that have subnotes
-            if subnoteCount > 0 {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(ds.surfaceAlt.opacity(0.6))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(ds.hairline, lineWidth: 1))
-                    .padding(.horizontal, 10)
-                    .offset(y: 7)
-
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(ds.surfaceAlt.opacity(0.8))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(ds.hairline, lineWidth: 1))
-                    .padding(.horizontal, 5)
-                    .offset(y: 3.5)
+        HStack(spacing: 12) {
+            if isEditMode {
+                Image(systemName: isMultiSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(isMultiSelected ? ds.accent : ds.inkFaintest)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
+            
+            ZStack(alignment: .top) {
+                // Depth layers for notes that have subnotes
+                if subnoteCount > 0 {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(ds.surfaceAlt.opacity(0.6))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(ds.hairline, lineWidth: 1))
+                        .padding(.horizontal, 10)
+                        .offset(y: 7)
 
-            // Main card
-            VStack(alignment: .leading, spacing: 0) {
-                // Metadata row
-                HStack(spacing: 0) {
-                    Text(jottMetaDate(note.modifiedAt))
-                        .font(.jottMono(10, weight: .medium))
-                        .foregroundStyle(ds.inkFaintest)
-                        .tracking(0.4)
-                    Spacer()
-                    if note.isPinned {
-                        Text("PINNED")
-                            .font(.jottMono(9, weight: .medium))
-                            .foregroundStyle(ds.accent.opacity(0.45))
-                            .tracking(0.6)
-                            .padding(.trailing, 6)
-                    }
-                    Text(jottRelativeDate(note.modifiedAt))
-                        .font(.jottMono(10))
-                        .foregroundStyle(ds.inkFaintest)
-                        .tracking(0.4)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(ds.surfaceAlt.opacity(0.8))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(ds.hairline, lineWidth: 1))
+                        .padding(.horizontal, 5)
+                        .offset(y: 3.5)
                 }
 
-                Spacer().frame(height: 10)
+                // Main card
+                VStack(alignment: .leading, spacing: 0) {
+                    // Metadata row
+                    HStack(spacing: 0) {
+                        Text(jottMetaDate(note.modifiedAt))
+                            .font(.jottMono(10, weight: .medium))
+                            .foregroundStyle(ds.inkFaintest)
+                            .tracking(0.4)
+                        Spacer()
+                        if note.isPinned {
+                            Text("PINNED")
+                                .font(.jottMono(9, weight: .medium))
+                                .foregroundStyle(ds.accent.opacity(0.45))
+                                .tracking(0.6)
+                                .padding(.trailing, 6)
+                        }
+                        Text(jottRelativeDate(note.modifiedAt))
+                            .font(.jottMono(10))
+                            .foregroundStyle(ds.inkFaintest)
+                            .tracking(0.4)
+                    }
 
-                Text(highlightedAttributedString(
-                    preview.title,
-                    matching: searchQuery,
-                    size: 15, weight: .medium,
-                    baseColor: ds.ink,
-                    highlightColor: ds.accent
-                ))
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineSpacing(1)
+                    Spacer().frame(height: 10)
 
-                if !preview.body.isEmpty {
-                    Spacer().frame(height: 7)
                     Text(highlightedAttributedString(
-                        preview.body,
+                        preview.title,
                         matching: searchQuery,
-                        size: 13,
-                        baseColor: ds.inkMute,
+                        size: 15, weight: .medium,
+                        baseColor: ds.ink,
                         highlightColor: ds.accent
                     ))
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineSpacing(2)
-                }
+                    .lineSpacing(1)
 
-                let hasTags = !note.tags.isEmpty
-                if hasTags || subnoteCount > 0 {
-                    Spacer().frame(height: 10)
-                    HStack(spacing: 6) {
-                        if hasTags {
-                            ForEach(note.tags.prefix(3), id: \.self) { tag in
-                                JottTagChip(tag: tag, ds: ds)
+                    if !preview.body.isEmpty {
+                        Spacer().frame(height: 7)
+                        Text(highlightedAttributedString(
+                            preview.body,
+                            matching: searchQuery,
+                            size: 13,
+                            baseColor: ds.inkMute,
+                            highlightColor: ds.accent
+                        ))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineSpacing(2)
+                    }
+
+                    let hasTags = !note.tags.isEmpty
+                    if hasTags || subnoteCount > 0 {
+                        Spacer().frame(height: 10)
+                        HStack(spacing: 6) {
+                            if hasTags {
+                                ForEach(note.tags.prefix(3), id: \.self) { tag in
+                                    JottTagChip(tag: tag, ds: ds)
+                                }
                             }
-                        }
-                        Spacer(minLength: 0)
-                        if subnoteCount > 0 {
-                            HStack(spacing: 3) {
-                                Image(systemName: "square.stack")
-                                    .font(.system(size: 9, weight: .semibold))
-                                Text("\(subnoteCount)")
-                                    .font(.jottMono(9, weight: .semibold))
+                            Spacer(minLength: 0)
+                            if subnoteCount > 0 {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "square.stack")
+                                        .font(.system(size: 9, weight: .semibold))
+                                    Text("\(subnoteCount)")
+                                        .font(.jottMono(9, weight: .semibold))
+                                }
+                                .foregroundStyle(ds.accent.opacity(0.75))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .background(ds.accentSoft, in: Capsule())
+                                .overlay(Capsule().strokeBorder(ds.accent.opacity(0.18), lineWidth: 0.8))
                             }
-                            .foregroundStyle(ds.accent.opacity(0.75))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(ds.accentSoft, in: Capsule())
-                            .overlay(Capsule().strokeBorder(ds.accent.opacity(0.18), lineWidth: 0.8))
                         }
                     }
-                }
 
-                Spacer().frame(height: 14)
+                    Spacer().frame(height: 14)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(ds.surface))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            isSelected ? ds.accentRing : ds.hairline,
+                            lineWidth: isSelected ? 1.5 : 1
+                        )
+                )
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(ds.surface))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? ds.accentRing : ds.hairline,
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
-            )
         }
         // Extra bottom clearance so the depth layers don't visually crowd the next card
         .padding(.bottom, subnoteCount > 0 ? 10 : 0)

@@ -28,8 +28,12 @@ struct JottDraftTable: Identifiable, Equatable {
 final class OverlayViewModel: ObservableObject {
 
     // MARK: - Published State
-    @Published var inputText: String = "" {
+    @Published var inputBlocks: [Block] = [Block(type: .paragraph, spans: [TextSpan("")])] {
         didSet {
+            let current = _inputText
+            guard current != _cachedInputText else { return }
+            _cachedInputText = current
+            
             guard !isProcessing else { return }
             isProcessing = true
             defer { isProcessing = false }
@@ -37,6 +41,19 @@ final class OverlayViewModel: ObservableObject {
             detectType()
             updateCommandSelectionIfNeeded()
             scheduleInputAutoSave()
+        }
+    }
+    
+    private var _cachedInputText: String = ""
+    private var _inputText: String { inputBlocks.map(\.plainText).joined(separator: "\n") }
+    
+    var inputText: String {
+        get { _inputText }
+        set {
+            let parsed = Block.plainTextBlocks(from: newValue)
+            if inputBlocks != parsed {
+                inputBlocks = parsed
+            }
         }
     }
     @Published var isVisible: Bool = false
@@ -109,6 +126,8 @@ final class OverlayViewModel: ObservableObject {
     /// When the panel was last dismissed with content — used for grace-period restore
     private var lastDismissDate: Date?
     private let gracePeriod: TimeInterval = 5 * 60   // 5 minutes
+    
+    @Published var dynamicTextHeight: CGFloat = 20
 
     // MARK: - Calendar
     let calendarManager = CalendarManager.shared
@@ -119,17 +138,16 @@ final class OverlayViewModel: ObservableObject {
     /// Content column width - fixed for notch panel.
     var panelDisplayWidth: CGFloat { 460 }
     var overlayExpandedHeight: CGFloat {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if commandMode != nil || inputText.hasPrefix("/") {
-            return 540
+            return 460
         }
-        if trimmed.isEmpty {
-            return 132
-        }
-        if trimmed.count > 260 || trimmed.contains("\n") {
-            return 380
-        }
-        return 250
+        
+        // Base notch panel height allowance is 112 (132 default - 20 text default).
+        // The morph shape perfectly tracks the exact text layout height dynamically.
+        let baseHeight: CGFloat = 112
+        let calculated = baseHeight + dynamicTextHeight
+        
+        return max(132, calculated)
     }
 
     // MARK: - Init

@@ -3094,7 +3094,7 @@ private struct LibraryEditFormatBar: View {
     }
 }
 
-private struct LibraryStoredTableEditor: View {
+struct LibraryStoredTableEditor: View {
     @Binding var block: Block
     @FocusState private var focusedCell: String?
 
@@ -3238,6 +3238,14 @@ private struct LibraryStoredTableEditor: View {
 
 private final class JottLibraryTextView: NSTextView {
     var libraryFormatHandler: ((JottTextFormatCommand) -> Bool)?
+    var onEscape: (() -> Void)? = nil
+    var onCmdReturn: (() -> Void)? = nil
+    var onCommandShiftF: (() -> Void)? = nil
+    var onCommandShiftM: (() -> Void)? = nil
+    var onCommandShiftK: (() -> Void)? = nil
+    var onCommandShiftX: (() -> Void)? = nil
+    var onBackspaceOnEmpty: (() -> Void)? = nil
+    
     var lastKnownSelectedRange = NSRange(location: 0, length: 0)
 
     func applyLibraryFormat(_ command: JottTextFormatCommand) -> Bool {
@@ -3248,6 +3256,9 @@ private final class JottLibraryTextView: NSTextView {
         let accepted = super.becomeFirstResponder()
         if accepted {
             JottTextFormattingRegistry.activeTextView = self
+            JottTextFormattingRegistry.libraryFormatHandler = { [weak self] cmd in
+                self?.applyLibraryFormat(cmd) ?? false
+            }
             let currentSelection = selectedRange()
             if currentSelection.location != 0 || lastKnownSelectedRange.location == 0 {
                 lastKnownSelectedRange = currentSelection
@@ -3267,8 +3278,33 @@ private final class JottLibraryTextView: NSTextView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard modifiers.contains(.command),
-              !modifiers.contains(.shift),
+        let hasCommand = modifiers.contains(.command)
+        let hasShift = modifiers.contains(.shift)
+        
+        if event.keyCode == 53 { // ESC
+            if let onEscape = onEscape { onEscape(); return true }
+            return super.performKeyEquivalent(with: event)
+        }
+        
+        if event.keyCode == 36 && hasCommand { // Cmd+Return
+            if let onCmdReturn = onCmdReturn { onCmdReturn(); return true }
+        }
+        
+        if event.keyCode == 51 && !hasCommand && !hasShift && (string.isEmpty || string == "\n") { // Backspace
+            if let onBackspaceOnEmpty = onBackspaceOnEmpty { onBackspaceOnEmpty(); return true }
+        }
+
+        if hasCommand && hasShift {
+            switch event.charactersIgnoringModifiers {
+            case "f", "F": onCommandShiftF?(); return true
+            case "m", "M": onCommandShiftM?(); return true
+            case "k", "K": onCommandShiftK?(); return true
+            case "x", "X": onCommandShiftX?(); return true
+            default: break
+            }
+        }
+        
+        guard hasCommand, !hasShift,
               !modifiers.contains(.option),
               !modifiers.contains(.control) else {
             return super.performKeyEquivalent(with: event)
@@ -3292,6 +3328,21 @@ private let kJBChecked = NSAttributedString.Key("JottBlockChecked")
 struct LibraryNoteTextEditor: NSViewRepresentable {
     @Binding var blocks: [Block]
     let isDark: Bool
+    
+    var placeholder: String = ""
+    var isFocused: Bool = false
+    /// Override the NSTextView's textContainerInset (default is 4pt top/bottom as in Library)
+    var textInset: NSSize = NSSize(width: 0, height: 4)
+    /// Override lineFragmentPadding (default 2 as in Library)
+    var lineFragmentPadding: CGFloat = 2
+    var onEscape: (() -> Void)? = nil
+    var onCmdReturn: (() -> Void)? = nil
+    var onToggleFormatShortcut: (() -> Void)? = nil
+    var onToggleVoiceShortcut: (() -> Void)? = nil
+    var onClearTagFilterShortcut: (() -> Void)? = nil
+    var onClearClipboardShortcut: (() -> Void)? = nil
+    var onBackspaceOnEmpty: (() -> Void)? = nil
+    var onHeightChange: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -3313,8 +3364,8 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         tv.autoresizingMask = [.width]
         tv.textContainer?.widthTracksTextView = true
         tv.textContainer?.heightTracksTextView = false
-        tv.textContainer?.lineFragmentPadding = 2
-        tv.textContainerInset = NSSize(width: 0, height: 4)
+        tv.textContainer?.lineFragmentPadding = lineFragmentPadding
+        tv.textContainerInset = textInset
 
         sv.documentView = tv
         context.coordinator.tv = tv
@@ -3323,18 +3374,42 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
             guard let coordinator, let tv else { return false }
             return coordinator.applyFormat(command, in: tv)
         }
+        tv.onEscape = onEscape
+        tv.onCmdReturn = onCmdReturn
+        tv.onCommandShiftF = onToggleFormatShortcut
+        tv.onCommandShiftM = onToggleVoiceShortcut
+        tv.onCommandShiftK = onClearTagFilterShortcut
+        tv.onCommandShiftX = onClearClipboardShortcut
+        tv.onBackspaceOnEmpty = onBackspaceOnEmpty
+        
         context.coordinator.load(blocks, into: tv)
-        DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
+        DispatchQueue.main.async {
+            if self.isFocused { tv.window?.makeFirstResponder(tv) }
+            context.coordinator.reportHeight(from: tv)
+        }
         return sv
     }
 
     func updateNSView(_ sv: NSScrollView, context: Context) {
-        guard let tv = sv.documentView as? NSTextView else { return }
+        guard let tv = sv.documentView as? JottLibraryTextView else { return }
         context.coordinator.parent = self
+        
+        tv.onEscape = onEscape
+        tv.onCmdReturn = onCmdReturn
+        tv.onCommandShiftF = onToggleFormatShortcut
+        tv.onCommandShiftM = onToggleVoiceShortcut
+        tv.onCommandShiftK = onClearTagFilterShortcut
+        tv.onCommandShiftX = onClearClipboardShortcut
+        tv.onBackspaceOnEmpty = onBackspaceOnEmpty
+        
+        if isFocused && tv.window?.firstResponder != tv {
+            DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
+        }
+        
+        // Never reload storage while the coordinator is mid-edit (typing, Enter continuation, etc.)
         guard !context.coordinator.suppressSync else { return }
+        
         let proposed = context.coordinator.displayString(for: blocks)
-        // A trailing \n in tv.string means the user just pressed Enter at the end;
-        // that pending newline is not yet reflected in blocks — don't reload over it.
         let current = context.coordinator.withoutTrailingNewlines(tv.string)
         let comparableProposed = context.coordinator.withoutTrailingNewlines(proposed)
         if current != comparableProposed { context.coordinator.load(blocks, into: tv) }
@@ -3355,6 +3430,15 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
                 result.removeLast()
             }
             return result
+        }
+        
+        func reportHeight(from tv: NSTextView) {
+            guard let lm = tv.layoutManager, let tc = tv.textContainer else { return }
+            lm.ensureLayout(for: tc)
+            var h = lm.usedRect(for: tc).height
+            if h < 10, let font = tv.font { h = font.ascender + abs(font.descender) }
+            let finalHeight = ceil(h + tv.textContainerInset.height * 2)
+            parent.onHeightChange?(finalHeight)
         }
 
         // MARK: Load blocks → attributed string
@@ -3550,28 +3634,159 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
 
         func applyFormat(_ command: JottTextFormatCommand, in tv: NSTextView) -> Bool {
             switch command {
+            // ── Paragraph-level (toggle: same type → revert to paragraph) ──
             case .bulletList:
-                applyParagraphFormat(prefix: "• ", attrs: listAttrs(indent: 14, type: .bulletItem, dark: parent.isDark), in: tv)
+                if currentBlockType(in: tv) == .bulletItem {
+                    applyParagraphFormat(prefix: "", attrs: paraAttrs(parent.isDark), in: tv, clearPrefix: "• ")
+                } else {
+                    applyParagraphFormat(prefix: "• ", attrs: listAttrs(indent: 14, type: .bulletItem, dark: parent.isDark), in: tv)
+                }
                 return true
             case .numberedList:
-                applyParagraphFormat(prefix: "1. ", attrs: listAttrs(indent: 24, type: .numberedItem, dark: parent.isDark), in: tv)
-                renumber(in: tv)
+                if currentBlockType(in: tv) == .numberedItem {
+                    applyParagraphFormat(prefix: "", attrs: paraAttrs(parent.isDark), in: tv, clearPrefix: nil)
+                } else {
+                    applyParagraphFormat(prefix: "1. ", attrs: listAttrs(indent: 24, type: .numberedItem, dark: parent.isDark), in: tv)
+                    renumber(in: tv)
+                }
                 return true
             case .taskList:
-                applyParagraphFormat(prefix: "☐ ", attrs: taskAttrs(checked: false, dark: parent.isDark), in: tv)
+                if currentBlockType(in: tv) == .taskItem {
+                    applyParagraphFormat(prefix: "", attrs: paraAttrs(parent.isDark), in: tv, clearPrefix: nil)
+                } else {
+                    applyParagraphFormat(prefix: "☐ ", attrs: taskAttrs(checked: false, dark: parent.isDark), in: tv)
+                }
                 return true
             case .quote:
-                applyParagraphFormat(prefix: "", attrs: quoteAttrs(dark: parent.isDark), in: tv)
+                if currentBlockType(in: tv) == .quote {
+                    applyParagraphFormat(prefix: "", attrs: paraAttrs(parent.isDark), in: tv, clearPrefix: nil)
+                } else {
+                    applyParagraphFormat(prefix: "", attrs: quoteAttrs(dark: parent.isDark), in: tv)
+                }
                 return true
             case .heading:
-                applyParagraphFormat(prefix: "", attrs: headingAttrs(level: 1, dark: parent.isDark), in: tv)
+                if currentBlockType(in: tv) == .heading {
+                    applyParagraphFormat(prefix: "", attrs: paraAttrs(parent.isDark), in: tv, clearPrefix: nil)
+                } else {
+                    applyParagraphFormat(prefix: "", attrs: headingAttrs(level: 1, dark: parent.isDark), in: tv)
+                }
                 return true
+
+            // ── Inline / character-level (toggle on/off over selection) ──
+            case .bold:          applyInlineFormat(.bold, in: tv);          return true
+            case .italic:        applyInlineFormat(.italic, in: tv);        return true
+            case .underline:     applyInlineFormat(.underline, in: tv);     return true
+            case .strikethrough: applyInlineFormat(.strikethrough, in: tv); return true
+            case .inlineCode:    applyInlineFormat(.inlineCode, in: tv);    return true
+            case .link:          applyInlineFormat(.link, in: tv);          return true
+
             default:
-                return true
+                return false
             }
         }
 
-        func applyParagraphFormat(prefix: String, attrs: [NSAttributedString.Key: Any], in tv: NSTextView) {
+        // ── Which attribute key / value pairs represent the given inline format ──
+        private func inlineFormatAttrs(_ cmd: JottTextFormatCommand) -> [NSAttributedString.Key: Any] {
+            switch cmd {
+            case .bold:
+                return [.font: NSFont.systemFont(ofSize: 14, weight: .bold)]
+            case .italic:
+                return [.obliqueness: 0.25 as NSNumber]
+            case .underline:
+                return [.underlineStyle: NSUnderlineStyle.single.rawValue as NSNumber]
+            case .strikethrough:
+                return [.strikethroughStyle: NSUnderlineStyle.single.rawValue as NSNumber]
+            case .inlineCode:
+                let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                let bg = NSColor(white: 1, alpha: 0.07)
+                return [.font: codeFont, .backgroundColor: bg]
+            case .link:
+                return [.underlineStyle: NSUnderlineStyle.single.rawValue as NSNumber,
+                        .foregroundColor: NSColor.systemBlue]
+            default:
+                return [:]
+            }
+        }
+
+        private func isInlineActive(_ cmd: JottTextFormatCommand, in tv: NSTextView) -> Bool {
+            guard let storage = tv.textStorage else { return false }
+            let sel = stableSelectedRange(in: tv)
+            // For zero-length selection check typing attributes
+            let checkRange = sel.length == 0
+                ? (sel.location > 0 ? NSRange(location: sel.location - 1, length: 1) : sel)
+                : sel
+            guard checkRange.location + checkRange.length <= storage.length else { return false }
+            let attrs = storage.attributes(at: checkRange.location, effectiveRange: nil)
+            switch cmd {
+            case .bold:
+                return (attrs[.font] as? NSFont)?.fontDescriptor.symbolicTraits.contains(.bold) ?? false
+            case .italic:
+                return (attrs[.obliqueness] as? NSNumber)?.floatValue ?? 0 > 0
+            case .underline:
+                return (attrs[.underlineStyle] as? NSNumber)?.intValue ?? 0 != 0
+            case .strikethrough:
+                return (attrs[.strikethroughStyle] as? NSNumber)?.intValue ?? 0 != 0
+            case .inlineCode:
+                return (attrs[.font] as? NSFont)?.isFixedPitch ?? false
+            default: return false
+            }
+        }
+
+        func applyInlineFormat(_ cmd: JottTextFormatCommand, in tv: NSTextView) {
+            guard let storage = tv.textStorage else { return }
+            let sel = stableSelectedRange(in: tv)
+
+            // Nothing selected → just toggle typing attributes for next typed chars
+            if sel.length == 0 {
+                var ta = tv.typingAttributes
+                let active = isInlineActive(cmd, in: tv)
+                let inlineAttrs = inlineFormatAttrs(cmd)
+                if active {
+                    for key in inlineAttrs.keys { ta.removeValue(forKey: key) }
+                    // Restore base font when removing bold/italic/code
+                    if cmd == .bold || cmd == .italic || cmd == .inlineCode {
+                        ta[.font] = NSFont.systemFont(ofSize: 14)
+                    }
+                } else {
+                    for (k, v) in inlineAttrs { ta[k] = v }
+                }
+                tv.typingAttributes = ta
+                return
+            }
+
+            // Has selection → toggle on the range
+            let active = isInlineActive(cmd, in: tv)
+            let inlineAttrs = inlineFormatAttrs(cmd)
+            suppressSync = true
+            storage.beginEditing()
+            if active {
+                for key in inlineAttrs.keys { storage.removeAttribute(key, range: sel) }
+                if cmd == .bold || cmd == .italic || cmd == .inlineCode {
+                    storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 14), range: sel)
+                }
+            } else {
+                for (k, v) in inlineAttrs { storage.addAttribute(k, value: v, range: sel) }
+            }
+            storage.endEditing()
+            let newBlocks = extractBlocks(from: storage)
+            if parent.blocks != newBlocks { parent.blocks = newBlocks }
+            suppressSync = false
+            tv.setSelectedRange(sel)
+        }
+
+        /// Returns the BlockType of the paragraph at the current cursor
+        func currentBlockType(in tv: NSTextView) -> BlockType {
+            guard let storage = tv.textStorage else { return .paragraph }
+            let sel = stableSelectedRange(in: tv)
+            let loc = min(sel.location, max(0, storage.length - 1))
+            guard storage.length > 0 else { return .paragraph }
+            let attrs = safeAttributes(in: storage, at: loc)
+            let raw = attrs[kJBType] as? String ?? BlockType.paragraph.rawValue
+            return BlockType(rawValue: raw) ?? .paragraph
+        }
+
+
+        func applyParagraphFormat(prefix: String, attrs: [NSAttributedString.Key: Any], in tv: NSTextView, clearPrefix: String? = nil) {
             guard let storage = tv.textStorage else { return }
             let selected = stableSelectedRange(in: tv)
             tv.setSelectedRange(selected)
@@ -3694,12 +3909,15 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let tv, let storage = tv.textStorage else { return }
+            guard let tv = notification.object as? NSTextView ?? tv, let storage = tv.textStorage else { return }
             if let libraryTextView = tv as? JottLibraryTextView {
                 libraryTextView.lastKnownSelectedRange = tv.selectedRange()
             }
             suppressSync = true
-            parent.blocks = extractBlocks(from: storage)
+            let newBlocks = extractBlocks(from: storage)
+            if parent.blocks != newBlocks { parent.blocks = newBlocks }
+            updateTypingAttrs(tv)
+            reportHeight(from: tv)
             suppressSync = false
         }
 

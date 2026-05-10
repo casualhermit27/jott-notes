@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 import Combine
+#if canImport(UIKit)
+import UIKit
+#endif
 
 class OverlayWindowController {
     let panel: OverlayPanel
@@ -19,11 +22,13 @@ class OverlayWindowController {
     private let floatingAllowance:    CGFloat = 116
 
     // Open: staggered springs. Width fires immediately, height+radius follow 60ms later.
-    // Close: cubic-bezier [0.22, 0, 0, 1] over 420ms — decisive collapse, no bounce.
     private let openSpring  = Animation.interpolatingSpring(
         mass: 1.0, stiffness: 130, damping: 21, initialVelocity: 1.0
     )
-    private let closeEasing = Animation.timingCurve(0.22, 0, 0, 1, duration: 0.42)
+    // Close: smooth liquid morphy spring to match opening fluidity.
+    private let closeSpring = Animation.interpolatingSpring(
+        mass: 1.0, stiffness: 140, damping: 22, initialVelocity: 0.0
+    )
 
     // Last height we animated to — used to skip no-op updates while the bar is open.
     private var lastExpandedHeight: CGFloat = 0
@@ -149,17 +154,21 @@ class OverlayWindowController {
             viewModel.revealCompactWidth = startWidth
             viewModel.morphWidth  = startWidth
             viewModel.morphHeight = startHeight
-            viewModel.morphRadius = 11
+            viewModel.morphRadius = 16
         } else {
             viewModel.morphWidth  = defaultCompactWidth
             viewModel.morphHeight = defaultCompactHeight
-            viewModel.morphRadius = 11
+            viewModel.morphRadius = 16
         }
         viewModel.contentVisible = false
 
         panel.setFrame(panelFrame(), display: false)
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
+
+        #if os(iOS)
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        #endif
 
         // Width springs open immediately — shape inhales.
         withAnimation(openSpring) {
@@ -170,12 +179,19 @@ class OverlayWindowController {
             guard let self else { return }
             withAnimation(self.openSpring) {
                 self.viewModel.morphHeight = targetHeight
-                self.viewModel.morphRadius = 8
+                self.viewModel.morphRadius = 22
             }
         }
-        // Content appears at 170ms — shape has started expanding, never mid-morph.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in
+        // Content fades in as the morph settles, reaching full opacity near 0.63s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
             self?.viewModel.contentVisible = true
+        }
+
+        // Haptic feedback precisely when the open spring (stiffness 130) settles
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.61) {
+            #if os(macOS)
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            #endif
         }
 
         DispatchQueue.main.async         { [weak self] in self?.focusTextView() }
@@ -221,22 +237,26 @@ class OverlayWindowController {
         // Content hidden immediately — pill re-appears 360ms after close starts.
         viewModel.contentVisible = false
 
-        withAnimation(closeEasing) {
+        #if os(iOS)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
+
+        withAnimation(closeSpring) {
             viewModel.morphWidth  = compactW
             viewModel.morphHeight = compactH
-            viewModel.morphRadius = 11
+            viewModel.morphRadius = 16
         }
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.viewModel.morphWidth    = self.defaultCompactWidth
             self.viewModel.morphHeight   = self.defaultCompactHeight
-            self.viewModel.morphRadius   = 11
+            self.viewModel.morphRadius   = 16
             self.panel.alphaValue = 0
             self.panel.orderOut(nil)
         }
         dismissWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.44, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: workItem)
     }
 
     func toggle() { viewModel.toggle() }

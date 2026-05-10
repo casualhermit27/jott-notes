@@ -54,9 +54,12 @@ class LibraryWindowController: NSWindowController, NSWindowDelegate {
 
     func show() {
         applyAppearance()
-        NSApp.setActivationPolicy(.regular)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func hide() {
+        window?.orderOut(nil)
     }
 
     // NSWindowDelegate — full-screen lifecycle
@@ -66,25 +69,23 @@ class LibraryWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidEnterFullScreen(_ notification: Notification) {
         isEnteringFullScreen = false
-        NSApp.setActivationPolicy(.regular)
     }
 
-    func windowDidExitFullScreen(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-    }
+    func windowDidExitFullScreen(_ notification: Notification) {}
 
-    // NSWindowDelegate — restore menu-bar-only mode when window closes
-    func windowWillClose(_ notification: Notification) {
+    // Hide (not close) when the window loses key status — click outside dismisses it.
+    func windowDidResignKey(_ notification: Notification) {
         guard !isEnteringFullScreen else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            let hasOtherWindows = NSApp.windows.contains {
-                $0.isVisible && $0 !== self.window && $0.styleMask.contains(.titled)
-            }
-            if !hasOtherWindows {
-                NSApp.setActivationPolicy(.accessory)
-            }
-        }
+        window?.orderOut(nil)
     }
+
+    // Close button hides rather than closes so the controller is reused on next open.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+
+    func windowWillClose(_ notification: Notification) {}
 
     private func applyAppearance() {
         let appearance = NSAppearance(named: viewModel.isDarkMode ? .darkAqua : .aqua)

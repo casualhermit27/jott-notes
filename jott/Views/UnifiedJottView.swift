@@ -36,6 +36,7 @@ enum JottTextFormatCommand: Equatable {
 
 final class JottTextFormattingRegistry {
     static weak var activeTextView: NSTextView?
+    static var libraryFormatHandler: ((JottTextFormatCommand) -> Bool)?
 }
 
 enum JottTextFormatting {
@@ -78,6 +79,9 @@ enum JottTextFormatting {
     @discardableResult
     static func apply(_ command: JottTextFormatCommand, to tv: NSTextView) -> Bool {
         JottTextFormattingRegistry.activeTextView = tv
+        if let handler = JottTextFormattingRegistry.libraryFormatHandler {
+            if handler(command) { return true }
+        }
         return false
     }
 }
@@ -500,6 +504,7 @@ struct JottCaptureView: View {
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Color.black)
+                    .frame(width: viewModel.morphWidth)
                     .padding(.top, 6)
             )
             .transition(.jottDropdown)
@@ -623,12 +628,13 @@ struct JottCaptureView: View {
             .background(
                 UnevenRoundedRectangle(
                     topLeadingRadius: 0,
-                    bottomLeadingRadius: 8,
-                    bottomTrailingRadius: 8,
+                    bottomLeadingRadius: viewModel.morphRadius,
+                    bottomTrailingRadius: viewModel.morphRadius,
                     topTrailingRadius: 0,
                     style: .continuous
                 )
                 .fill(jottNotchVoidBlack)
+                .frame(width: viewModel.morphWidth)
             )
 
             // ── Dropdown — floats below input panel ────────────────────────
@@ -742,7 +748,7 @@ struct JottInputArea: View {
     ]
 
     // When dropdown is visible leave room for it; when not, fill the panel
-    private var maxTextHeight: CGFloat { dropdownVisible ? 120 : 540 }
+    private var maxTextHeight: CGFloat { dropdownVisible ? 120 : 420 }
 
     var badge: TypeBadgeInfo? {
         if let forced = viewModel.forcedType {
@@ -786,6 +792,38 @@ struct JottInputArea: View {
         return badgeInfoForCommand(cmd)
     }
 
+    private func handleCmdReturn() {
+        if viewModel.inlineEditingId != nil { viewModel.saveInlineEdit(); return }
+        let trimmed = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, viewModel.commandCreationPreview() != nil {
+            viewModel.createCurrentItem(); return
+        }
+        let smartItems = viewModel.smartRecallResults
+        if !smartItems.isEmpty {
+            let idx = max(0, min(viewModel.selectedCommandIndex, smartItems.count - 1))
+            switch smartItems[idx] {
+            case .note(let n):     viewModel.selectedNote = n
+            case .reminder(let r): viewModel.selectedReminder = r
+            }
+            return
+        }
+        let cmdItems = viewModel.currentCommandItems()
+        if !cmdItems.isEmpty {
+            viewModel.startInlineEdit()
+            if viewModel.inlineEditingId == nil { viewModel.openSelectedCommandItem() }
+            return
+        }
+        viewModel.createCurrentItem()
+    }
+
+    private func handleHeightChange(_ h: CGFloat) {
+        let clamped = min(h, maxTextHeight)
+        viewModel.dynamicTextHeight = clamped
+        withAnimation(.interpolatingSpring(mass: 0.9, stiffness: 200, damping: 26)) {
+            textHeight = clamped
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
@@ -799,29 +837,38 @@ struct JottInputArea: View {
                 }
 
                 // Text editor — trailing padding reserves room for overlay controls
+                let hasNonParagraphBlock = viewModel.inputBlocks.contains { $0.type != .paragraph }
                 let showHintOverlay = viewModel.inputText.isEmpty
+                    && !hasNonParagraphBlock
                     && !speech.isRecording
                     && viewModel.forcedType == nil
                     && viewModel.commandMode == nil
 
+                let textBlocksBinding = Binding<[Block]>(
+                    get: { viewModel.inputBlocks.filter { $0.type != .table } },
+                    set: { newText in
+                        var merged = newText
+                        merged.append(contentsOf: viewModel.inputBlocks.filter { $0.type == .table })
+                        viewModel.inputBlocks = merged
+                    }
+                )
+
                 ZStack(alignment: .topLeading) {
-                    JottNativeInput(
-                        text: $viewModel.inputText,
-                        viewModel: viewModel,
+                    LibraryNoteTextEditor(
+                        blocks: textBlocksBinding,
+                        isDark: true,
                         placeholder: showHintOverlay ? "" : placeholderText,
-                        isDark: true,  // panel is always black
                         isFocused: focused,
+                        textInset: .zero,
+                        lineFragmentPadding: 0,
                         onEscape: { viewModel.handleEscape() },
+                        onCmdReturn: handleCmdReturn,
                         onToggleFormatShortcut: toggleFormatBar,
                         onToggleVoiceShortcut: onToggleVoice,
                         onClearTagFilterShortcut: clearActiveTagFilter,
                         onClearClipboardShortcut: clearClipboardPrefill,
                         onBackspaceOnEmpty: { viewModel.clearForcedType() },
-                        onHeightChange: { h in
-                            withAnimation(.spring(response: 0.36, dampingFraction: 0.72)) {
-                                textHeight = min(h, maxTextHeight)
-                            }
-                        }
+                        onHeightChange: handleHeightChange
                     )
 
                     if showHintOverlay {
@@ -838,7 +885,7 @@ struct JottInputArea: View {
                 .animation(.easeInOut(duration: 0.45), value: hintIndex)
                 .onChange(of: dropdownVisible) { _, visible in
                     withAnimation(JottMotion.content) {
-                        textHeight = min(textHeight, visible ? 120 : 500)
+                        textHeight = min(textHeight, visible ? 120 : 420)
                     }
                 }
             }
@@ -901,10 +948,11 @@ struct JottInputArea: View {
                 .padding(.trailing, 8)
             }
 
-            if !viewModel.draftTables.isEmpty {
+            let tableIndices = viewModel.inputBlocks.indices.filter { viewModel.inputBlocks[$0].type == .table }
+            if !tableIndices.isEmpty {
                 VStack(spacing: 10) {
-                    ForEach($viewModel.draftTables) { $table in
-                        JottDraftTableEditor(table: $table)
+                    ForEach(tableIndices, id: \.self) { idx in
+                        LibraryStoredTableEditor(block: $viewModel.inputBlocks[idx])
                     }
                 }
                 .padding(.horizontal, 12)
@@ -3648,10 +3696,67 @@ final class JottNSTextView: NSTextView {
     }
 }
 
+// MARK: - Table Grid Selector
+
+struct TableGridSelector: View {
+    let onSelect: (Int, Int) -> Void
+    @State private var hoveredRow: Int = 1
+    @State private var hoveredCol: Int = 1
+    
+    let maxRows = 10
+    let maxCols = 10
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(max(1, hoveredRow)) x \(max(1, hoveredCol))")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.primary.opacity(0.85))
+                Spacer()
+                Text("Table")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 2)
+            
+            VStack(spacing: 3) {
+                ForEach(1...maxRows, id: \.self) { r in
+                    HStack(spacing: 3) {
+                        ForEach(1...maxCols, id: \.self) { c in
+                            Rectangle()
+                                .fill(r <= hoveredRow && c <= hoveredCol ? Color.blue.opacity(0.8) : Color.primary.opacity(0.08))
+                                .frame(width: 12, height: 12)
+                                .cornerRadius(2)
+                                .onHover { hovering in
+                                    if hovering {
+                                        hoveredRow = r
+                                        hoveredCol = c
+                                    }
+                                }
+                                .onTapGesture {
+                                    onSelect(r, c)
+                                }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.05, alpha: 0.95)))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+        .frame(width: 170)
+    }
+}
+
 // MARK: - Format Bar
 
 struct JottFormatBar: View {
     @ObservedObject var viewModel: OverlayViewModel
+    @State private var showTableGrid = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -3691,24 +3796,16 @@ struct JottFormatBar: View {
 
     private func apply(_ command: JottTextFormatCommand) {
         if case .table(let rows, let columns) = command {
-            viewModel.insertDraftTable(rows: rows, columns: columns)
+            let tableBlock = JottDraftTable(rows: rows, columns: columns).block
+            viewModel.inputBlocks.append(tableBlock)
             return
         }
-        var text = viewModel.inputText
-        if !JottTextFormatting.apply(command, fallbackText: &text) {
-            viewModel.inputText = text
-        }
+        _ = JottTextFormatting.apply(command)
     }
 
     private var tableMenu: some View {
-        Menu {
-            ForEach([2, 3, 4, 5], id: \.self) { columns in
-                Button("\(columns) columns x 3 rows") { apply(.table(rows: 3, columns: columns)) }
-            }
-            Divider()
-            Button("2 x 2") { apply(.table(rows: 2, columns: 2)) }
-            Button("4 x 4") { apply(.table(rows: 4, columns: 4)) }
-            Button("6 x 4") { apply(.table(rows: 4, columns: 6)) }
+        Button {
+            showTableGrid.toggle()
         } label: {
             Image(systemName: "tablecells")
                 .font(.system(size: 11, weight: .medium))
@@ -3716,8 +3813,13 @@ struct JottFormatBar: View {
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.92, pressedOpacity: 0.9))
+        .popover(isPresented: $showTableGrid, arrowEdge: .bottom) {
+            TableGridSelector { rows, cols in
+                apply(.table(rows: rows, columns: cols))
+                showTableGrid = false
+            }
+        }
         .accessibilityLabel("Insert table")
     }
 
