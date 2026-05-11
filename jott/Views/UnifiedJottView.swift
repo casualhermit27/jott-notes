@@ -867,7 +867,13 @@ struct JottInputArea: View {
                         onToggleVoiceShortcut: onToggleVoice,
                         onClearTagFilterShortcut: clearActiveTagFilter,
                         onClearClipboardShortcut: clearClipboardPrefill,
-                        onBackspaceOnEmpty: { viewModel.clearForcedType() },
+                        onBackspaceOnEmpty: {
+                            if viewModel.commandMode != nil {
+                                viewModel.clearCommandMode()
+                            } else {
+                                viewModel.clearForcedType()
+                            }
+                        },
                         onHeightChange: handleHeightChange
                     )
 

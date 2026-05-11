@@ -3290,8 +3290,24 @@ private final class JottLibraryTextView: NSTextView {
             if let onCmdReturn = onCmdReturn { onCmdReturn(); return true }
         }
         
-        if event.keyCode == 51 && !hasCommand && !hasShift && (string.isEmpty || string == "\n") { // Backspace
+        if event.keyCode == 51 && !hasCommand && !hasShift && !modifiers.contains(.option) && !modifiers.contains(.control) && (string.isEmpty || string == "\n") { // Backspace
             if let onBackspaceOnEmpty = onBackspaceOnEmpty { onBackspaceOnEmpty(); return true }
+        }
+
+        // Tab auto-completes partial slash commands (e.g. /sea<Tab> → /search )
+        if event.keyCode == 48,
+           !hasCommand, !hasShift, !modifiers.contains(.option), !modifiers.contains(.control),
+           string.hasPrefix("/") {
+            let query = String(string.dropFirst()).lowercased()
+            if let match = allCommandChips.first(where: {
+                $0.label.lowercased().hasPrefix(query) ||
+                String($0.shorthand.dropFirst()).hasPrefix(query) ||
+                String($0.insert.dropFirst()).hasPrefix(query)
+            }) {
+                self.string = match.insert
+                self.setSelectedRange(NSRange(location: match.insert.count, length: 0))
+                return true
+            }
         }
 
         if hasCommand && hasShift {
@@ -3904,6 +3920,12 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
             if sel == #selector(NSResponder.insertNewline(_:))  { return handleEnter(in: tv) }
+            // Backspace on empty field — clear command/forced mode (fallback when performKeyEquivalent misses it)
+            if sel == #selector(NSResponder.deleteBackward(_:)),
+               (tv.string.isEmpty || tv.string == "\n") {
+                parent.onBackspaceOnEmpty?()
+                return true
+            }
             if sel == #selector(NSResponder.deleteBackward(_:)) { return handleBackspace(in: tv) }
             return false
         }

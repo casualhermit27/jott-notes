@@ -38,6 +38,7 @@ final class OverlayViewModel: ObservableObject {
             isProcessing = true
             defer { isProcessing = false }
             stripCreationPrefixIfNeeded()   // strip /note , /reminder  → sets forcedTypeOverride
+            activateSlashCommandIfNeeded() // strip /search, /today, /recent → sets commandMode
             detectType()
             updateCommandSelectionIfNeeded()
             scheduleInputAutoSave()
@@ -200,6 +201,18 @@ final class OverlayViewModel: ObservableObject {
             inputText = String(inputText.dropFirst(prefix.count))
             return
         }
+    }
+
+    // MARK: - Slash command auto-activation
+
+    /// When user types a recognized slash command (/s, /search, /t, /today, /r, /recent),
+    /// auto-activate the corresponding command mode and strip the prefix from the input
+    /// so that any typed query is preserved and the slash text does not linger.
+    private func activateSlashCommandIfNeeded() {
+        guard commandMode == nil || isTypingNewCommand else { return }
+        guard inputText.hasPrefix("/"), let cmd = JottCommand(input: inputText) else { return }
+        activateCommandMode(cmd)
+        inputText = ""
     }
 
     // MARK: - Type detection
