@@ -3785,6 +3785,8 @@ struct JottFormatBar: View {
                 MFIcon("textformat.size", accessibilityLabel: "Heading") { apply(.heading) }
                 tableMenu
             }
+            fmtSep
+            enhanceBtn
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -3826,6 +3828,31 @@ struct JottFormatBar: View {
             }
         }
         .accessibilityLabel("Insert table")
+    }
+
+    private var enhanceBtn: some View {
+        Button {
+            Task {
+                let text = viewModel.inputText
+                guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                do {
+                    let enhanced = try await AIEnhancementService.shared.enhance(text)
+                    viewModel.inputText = enhanced
+                } catch {
+                    // Silently fail — enhancement is best-effort
+                }
+            }
+        } label: {
+            Text("Enhance")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.primary.opacity(0.60))
+                .frame(height: 26)
+                .padding(.horizontal, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.92, pressedOpacity: 0.9))
+        .accessibilityLabel("Enhance with AI")
+        .accessibilityHint("Rewrites and improves the current text.")
     }
 
     private func MFBtn(_ lbl: String, style: FmtStyle, accessibilityLabel: String, action: @escaping () -> Void) -> some View {

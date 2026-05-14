@@ -3050,6 +3050,8 @@ private struct LibraryEditFormatBar: View {
             icon("textformat.size", command: .heading)
             icon("link", command: .link)
             tableMenu
+            sep
+            enhanceBtn
         }
     }
 
@@ -3057,20 +3059,47 @@ private struct LibraryEditFormatBar: View {
         Rectangle().fill(Color.secondary.opacity(0.18)).frame(width: 1, height: 13).padding(.horizontal, 3)
     }
 
+    @State private var showTableGrid = false
+
     private var tableMenu: some View {
-        Menu {
-            Button("2 x 2") { insertTable(rows: 2, columns: 2) }
-            Button("3 x 3") { insertTable(rows: 3, columns: 3) }
-            Button("4 x 4") { insertTable(rows: 4, columns: 4) }
-            Button("6 x 4") { insertTable(rows: 4, columns: 6) }
+        Button {
+            showTableGrid.toggle()
         } label: {
             Image(systemName: "tablecells")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.secondary)
                 .frame(width: 22, height: 22)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        .buttonStyle(.plain)
+        .popover(isPresented: $showTableGrid, arrowEdge: .bottom) {
+            TableGridSelector { rows, cols in
+                insertTable(rows: rows, columns: cols)
+                showTableGrid = false
+            }
+        }
+    }
+
+    private var enhanceBtn: some View {
+        Button {
+            Task {
+                let text = blocks.map(\.plainText).joined(separator: "\n")
+                guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                do {
+                    let enhanced = try await AIEnhancementService.shared.enhance(text)
+                    let newBlocks = Block.plainTextBlocks(from: enhanced)
+                    if blocks != newBlocks { blocks = newBlocks }
+                } catch {
+                    // Silently fail
+                }
+            }
+        } label: {
+            Text("Enhance")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.75))
+                .frame(height: 22)
+                .padding(.horizontal, 4)
+        }
+        .buttonStyle(.plain)
     }
 
     private func apply(_ command: JottTextFormatCommand) {
@@ -3413,6 +3442,7 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         let tv = JottLibraryTextView()
         tv.delegate = context.coordinator
         tv.isRichText = false
+        tv.allowsUndo = true
         tv.isEditable = true
         tv.isSelectable = true
         tv.drawsBackground = false
@@ -3511,9 +3541,13 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         func load(_ blocks: [Block], into tv: NSTextView) {
             guard let storage = tv.textStorage else { return }
             let saved = tv.selectedRange()
+            // Disable undo registration so programmatic loads don't pollute
+            // or clear the undo history the user built by typing.
+            tv.undoManager?.disableUndoRegistration()
             storage.beginEditing()
             storage.setAttributedString(makeAttributedString(blocks))
             storage.endEditing()
+            tv.undoManager?.enableUndoRegistration()
             tv.setSelectedRange(NSRange(location: min(saved.location, storage.length), length: 0))
             updateTypingAttrs(tv)
         }
@@ -3584,19 +3618,22 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
 
         private func spanFont(_ span: TextSpan, base: NSFont) -> NSFont {
             if span.code { return NSFont.monospacedSystemFont(ofSize: base.pointSize - 1, weight: .regular) }
-            var traits = base.fontDescriptor.symbolicTraits
-            if span.bold   { traits.insert(.bold) }
-            if span.italic { traits.insert(.italic) }
-            guard traits != base.fontDescriptor.symbolicTraits else { return base }
-            let desc = base.fontDescriptor.withSymbolicTraits(traits)
-            return NSFont(descriptor: desc, size: base.pointSize) ?? base
+            var mask = NSFontTraitMask()
+            if span.bold   { mask.insert(.boldFontMask) }
+            if span.italic { mask.insert(.italicFontMask) }
+            guard !mask.isEmpty else { return base }
+            return NSFontManager.shared.convert(base, toHaveTrait: mask)
         }
 
         private func toggleFontTrait(_ trait: NSFontDescriptor.SymbolicTraits, on font: NSFont, remove: Bool) -> NSFont {
-            var traits = font.fontDescriptor.symbolicTraits
-            if remove { traits.remove(trait) } else { traits.insert(trait) }
-            let desc = font.fontDescriptor.withSymbolicTraits(traits)
-            return NSFont(descriptor: desc, size: font.pointSize) ?? font
+            var mask = NSFontTraitMask()
+            if trait.contains(.bold)   { mask.insert(.boldFontMask) }
+            if trait.contains(.italic) { mask.insert(.italicFontMask) }
+            if trait.contains(.monoSpace) || font.isFixedPitch { mask.insert(.fixedPitchFontMask) }
+            guard !mask.isEmpty else { return font }
+            return remove
+                ? NSFontManager.shared.convert(font, toNotHaveTrait: mask)
+                : NSFontManager.shared.convert(font, toHaveTrait: mask)
         }
 
         // MARK: Display string (used only for change detection)

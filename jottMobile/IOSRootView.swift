@@ -10,14 +10,20 @@ struct IOSRootView: View {
     @StateObject private var purchases = PurchaseManager.shared
     @State private var showRequestedNewNote = false
     @State private var showPaywall = false
+    @State private var folderStack: [UUID] = []
+    @State private var activeFilter: IOSLibraryFilter = .none
+    @State private var showSettings = false
     private let syncTick = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            IOSLibraryView(selectedNote: $selectedNote)
+            IOSLibraryView(
+                selectedNote: $selectedNote,
+                folderStack: $folderStack,
+                activeFilter: $activeFilter,
+                showSettings: $showSettings
+            )
         } detail: {
-            // Explicit NavigationStack in the detail column so that
-            // navigationDestination(for: Note.self) works for subnote push.
             NavigationStack {
                 if let note = selectedNote {
                     IOSDetailView(note: note, onDelete: { selectedNote = nil })
@@ -27,52 +33,28 @@ struct IOSRootView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $showPaywall) {
-            IOSPaywallView()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .jottShowPaywall)) { _ in
-            showPaywall = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .jottOpenCapture)) { _ in
-            quickCapture.requestCapture()
-        }
+        .fullScreenCover(isPresented: $showPaywall) { IOSPaywallView() }
+        .onReceive(NotificationCenter.default.publisher(for: .jottShowPaywall)) { _ in showPaywall = true }
+        .onReceive(NotificationCenter.default.publisher(for: .jottOpenCapture)) { _ in quickCapture.requestCapture() }
         .onReceive(NotificationCenter.default.publisher(for: .jottOpenSearch)) { _ in
             NotificationCenter.default.post(name: .jottFocusSearch, object: nil)
         }
         .fullScreenCover(isPresented: $showRequestedNewNote) {
-            IOSNewNoteComposerView(
-                title: "New Note",
-                folderId: nil,
-                parentId: nil
-            ) { note in
+            IOSNewNoteComposerView(title: "New Note", folderId: nil, parentId: nil) { note in
                 selectedNote = note
             }
         }
-        .task {
-            await NotificationManager.shared.requestPermission()
-        }
-        .onAppear {
-            presentRequestedNewNoteIfNeeded()
-        }
-        .onReceive(quickCapture.$requestToken.dropFirst()) { _ in
-            showRequestedNewNote = true
-        }
+        .sheet(isPresented: $showSettings) { IOSSettingsView() }
+        .task { await NotificationManager.shared.requestPermission() }
+        .onAppear { presentRequestedNewNoteIfNeeded() }
+        .onReceive(quickCapture.$requestToken.dropFirst()) { _ in showRequestedNewNote = true }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                noteStore.refreshFromDisk()
-                presentRequestedNewNoteIfNeeded()
-            }
+            if phase == .active { noteStore.refreshFromDisk(); presentRequestedNewNoteIfNeeded() }
         }
-        .onReceive(syncTick) { _ in
-            if scenePhase == .active {
-                noteStore.refreshFromDisk()
-            }
-        }
+        .onReceive(syncTick) { _ in if scenePhase == .active { noteStore.refreshFromDisk() } }
         .onOpenURL { url in
             guard url.scheme == "jott" else { return }
-            if url.host == "new" || url.path == "/new" {
-                quickCapture.requestCapture()
-            }
+            if url.host == "new" || url.path == "/new" { quickCapture.requestCapture() }
         }
     }
 

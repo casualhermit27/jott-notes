@@ -148,6 +148,9 @@ class OverlayWindowController {
         applyAppearance()
         NSApp.activate(ignoringOtherApps: true)
 
+        // Clear stale text-view cache so we always find the live editor.
+        cachedTextView = nil
+
         hostingView?.layer?.removeAllAnimations()
         hostingView?.layer?.transform = CATransform3DIdentity
 
@@ -211,6 +214,7 @@ class OverlayWindowController {
 
         DispatchQueue.main.async         { [weak self] in self?.focusTextView() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.focusTextView() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) { [weak self] in self?.focusTextView() }
     }
 
     private func handoffNotchWidth() -> CGFloat {
@@ -227,7 +231,7 @@ class OverlayWindowController {
     private weak var cachedTextView: NSTextView?
 
     private func focusTextView() {
-        if let tv = cachedTextView, tv.window != nil {
+        if let tv = cachedTextView, tv.window === panel {
             panel.makeFirstResponder(tv)
             return
         }

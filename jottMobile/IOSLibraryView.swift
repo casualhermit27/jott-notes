@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Filter
 
-private enum IOSLibraryFilter: Equatable {
+enum IOSLibraryFilter: Equatable {
     case none, pinned, today, thisWeek, thisMonth, recentlyDeleted
     case tagged(String)
 
@@ -25,25 +25,24 @@ private enum IOSLibraryFilter: Equatable {
 
 struct IOSLibraryView: View {
     @Binding var selectedNote: Note?
+    @Binding var folderStack: [UUID]
+    @Binding var activeFilter: IOSLibraryFilter
+    @Binding var showSettings: Bool
     @ObservedObject private var noteStore = NoteStore.shared
     @Environment(\.colorScheme) private var scheme
 
     @State private var searchText = ""
     @State private var isSearchPresented = false
-    @State private var activeFilter: IOSLibraryFilter = .none
     @State private var isEditMode = false
     @State private var selectedNoteIDs: Set<UUID> = []
 
-    @State private var folderStack: [UUID] = []
     @State private var searchResults: [SearchResult] = []
     @State private var showNewNote = false
     @State private var showNewFolder = false
-    @State private var showSettings = false
     @State private var isSyncing = false
     @State private var initialSyncDone = false
     @State private var showSyncTick = false
     @State private var folderToRename: NoteFolder? = nil
-    @State private var renameText = ""
     @State private var folderToDelete: NoteFolder? = nil
 
     private var ds: JottDS { JottDS(isDark: scheme == .dark) }
@@ -86,18 +85,18 @@ struct IOSLibraryView: View {
             // List drives NavigationSplitView selection — required for iPhone push navigation
             List(selection: $selectedNote) {
 
-                // Folder breadcrumb
-                if !folderStack.isEmpty && !isSearching && !isRecentlyDeleted {
-                    folderBreadcrumb
+                // Folder chips
+                if !isSearching && !isRecentlyDeleted {
+                    folderChipStrip
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .selectionDisabled()
                 }
-                
-                // Folder chips
-                let subfolders = noteStore.folders.filter { $0.parentId == activeFolderID }
-                if !subfolders.isEmpty && !isSearching && !isRecentlyDeleted {
-                    folderChipsRow(subfolders)
+
+                // Folder breadcrumb (subfolder navigation)
+                if !folderStack.isEmpty && !isSearching && !isRecentlyDeleted {
+                    folderBreadcrumb
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
@@ -239,16 +238,17 @@ struct IOSLibraryView: View {
                     selectedNote = note
                 }
             }
-            .sheet(isPresented: $showSettings) { IOSSettingsView() }
-            .sheet(isPresented: $showNewFolder) {
-                IOSFolderComposerView(folderId: activeFolderID)
-            }
-            .sheet(item: $folderToRename) { folder in
-                IOSFolderRenameView(folder: folder, onSave: { newName in
-                    noteStore.renameFolder(folder.id, to: newName)
-                    folderToRename = nil
-                }, onCancel: { folderToRename = nil })
-            }
+                .sheet(isPresented: $showNewFolder) {
+                    IOSFolderComposerView(folderId: activeFolderID)
+                }
+                .sheet(item: $folderToRename) { folder in
+                    IOSFolderRenameView(folder: folder, onSave: { newName in
+                        noteStore.renameFolder(folder.id, to: newName)
+                        folderToRename = nil
+                    }, onCancel: {
+                        folderToRename = nil
+                    })
+                }
             .confirmationDialog(
                 "Delete \"\(folderToDelete?.name ?? "")\"?",
                 isPresented: Binding(get: { folderToDelete != nil }, set: { if !$0 { folderToDelete = nil } }),
@@ -372,90 +372,95 @@ struct IOSLibraryView: View {
         return noteStore.folders.first(where: { $0.id == parentId })?.name ?? "All Notes"
     }
 
-    @ViewBuilder
-    private func folderGrid(_ folders: [NoteFolder]) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            ForEach(folders) { folder in
-                Button {
-                    withAnimation(JottMotion.content) { folderStack.append(folder.id) }
-                } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(folder.displayColor)
-                        Text(folder.name)
-                            .font(.jottBody(14, weight: .semibold))
-                            .foregroundColor(ds.ink)
-                            .lineLimit(1)
-                        Text("\(noteStore.allNotes().filter { $0.folderId == folder.id }.count) notes")
-                            .font(.jottCaption(11))
-                            .foregroundColor(ds.inkFaint)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(ds.surface, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ds.hairline, lineWidth: 1))
+    // folder context menu (used by chip long-press in the future)
+    private func folderContextMenuItems(_ folder: NoteFolder) -> some View {
+        Group {
+            Button {
+                folderToRename = folder
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                folderToDelete = folder
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: - Folder chips
+
+    private var folderChipStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                allChip
+                folderChips
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var allChip: some View {
+        let isActive = folderStack.isEmpty && activeFilter == .none
+        return Button {
+            withAnimation(JottMotion.content) { folderStack = []; activeFilter = .none }
+        } label: {
+            folderChipLabel("All", isActive: isActive)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var folderChips: some View {
+        ForEach(noteStore.folders.filter { $0.parentId == nil }) { folder in
+            let isActive = folderStack.last == folder.id
+            Menu {
+                Button { folderToRename = folder } label: {
+                    Label("Rename", systemImage: "pencil")
                 }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button {
-                        renameText = folder.name
-                        folderToRename = folder
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                    Button(role: .destructive) {
-                        folderToDelete = folder
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                Button(role: .destructive) { folderToDelete = folder } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            } label: {
+                folderChipLabel(folder.name, icon: "folder.fill",
+                                color: folder.displayColor, isActive: isActive)
+                    .padding(.bottom, 12)
+            } primaryAction: {
+                withAnimation(JottMotion.content) {
+                    if isActive {
+                        folderStack = []
+                    } else {
+                        folderStack = [folder.id]
+                        activeFilter = .none
                     }
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private func folderChipsRow(_ folders: [NoteFolder]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(folders) { folder in
-                    Button {
-                        withAnimation(JottMotion.content) { folderStack.append(folder.id) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(folder.displayColor)
-                            Text(folder.name)
-                                .font(.jottCaption(13, weight: .medium))
-                                .foregroundStyle(ds.ink)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(folder.displayColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(folder.displayColor.opacity(0.25), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            renameText = folder.name
-                            folderToRename = folder
-                        } label: {
-                            Label("Rename", systemImage: "pencil")
-                        }
-                        Button(role: .destructive) {
-                            folderToDelete = folder
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                }
+    private func folderChipLabel(
+        _ name: String,
+        icon: String? = nil,
+        color: Color = .clear,
+        isActive: Bool
+    ) -> some View {
+        HStack(spacing: 5) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isActive ? .white : color != .clear ? color : ds.inkMute)
             }
-            .padding(.vertical, 4)
+            Text(name)
+                .font(.jottCaption(13, weight: isActive ? .semibold : .medium))
+                .foregroundStyle(isActive ? .white : ds.ink)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            isActive ? (color != .clear ? color : ds.accent) : ds.surface,
+            in: Capsule()
+        )
+        .overlay(Capsule().strokeBorder(isActive ? Color.clear : ds.hairline, lineWidth: 1))
     }
 
     // MARK: - Empty state
@@ -605,11 +610,10 @@ struct IOSLibraryView: View {
         ToolbarItem(placement: .navigationBarLeading) {
             HStack(spacing: 12) {
                 Button { showSettings = true } label: {
-                    Image(systemName: "gear")
+                    Image(systemName: "gearshape")
                         .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(ds.inkMute)
                 }
-                
                 Button {
                     isEditMode.toggle()
                     if !isEditMode { selectedNoteIDs.removeAll() }
