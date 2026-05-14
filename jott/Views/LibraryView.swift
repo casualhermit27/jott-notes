@@ -1827,6 +1827,13 @@ struct TimelineItemView: View {
         .contentShape(Rectangle())
         .contextMenu {
             if case .note(let note) = item {
+                Button {
+                    if let url = NoteStore.shared.exportNoteAsMarkdown(note) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label("Export as Markdown", systemImage: "square.and.arrow.up")
+                }
                 Button("Delete", role: .destructive) {
                     withAnimation(JottMotion.content) { viewModel.deleteNote(note.id) }
                 }
@@ -2462,10 +2469,11 @@ private struct LibraryTopBar: View {
                 Button {
                     activeFilter = activeFilter == .recentlyDeleted ? .none : .recentlyDeleted
                 } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12, weight: .medium))
+                    Text("Recently Deleted")
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundColor(activeFilter == .recentlyDeleted ? ds.accent : ds.inkFaint)
-                        .frame(width: 28, height: 28)
+                        .padding(.horizontal, 8)
+                        .frame(height: 28)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(activeFilter == .recentlyDeleted ? ds.accentSoft : Color.clear)
@@ -2473,6 +2481,25 @@ private struct LibraryTopBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Recently Deleted")
+
+                Button {
+                    if let zipURL = NoteStore.shared.exportAllNotesAsZip() {
+                        let panel = NSSavePanel()
+                        panel.nameFieldStringValue = "jott-export.zip"
+                        panel.begin { result in
+                            if result == .OK, let dest = panel.url {
+                                try? FileManager.default.copyItem(at: zipURL, to: dest)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(ds.inkFaint)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Export All Notes")
             }
 
             // Filter button
@@ -2970,11 +2997,21 @@ struct LibraryBlockEditor: View {
         VStack(alignment: .leading, spacing: 0) {
             LibraryNoteTextEditor(blocks: textBlocksBinding, isDark: isDarkMode)
                 .frame(minHeight: 180)
+            ForEach(imageIndices, id: \.self) { i in
+                if let path = blocks[i].imageURL, !path.isEmpty {
+                    AttachmentImageView(path: path, alt: blocks[i].imageAlt)
+                        .padding(.top, 8)
+                }
+            }
             ForEach(tableIndices, id: \.self) { i in
                 LibraryStoredTableEditor(block: $blocks[i])
                     .padding(.top, 8)
             }
         }
+    }
+
+    private var imageIndices: [Int] {
+        blocks.indices.filter { blocks[$0].type == .image }
     }
 
     private var tableIndices: [Int] {
@@ -2983,10 +3020,10 @@ struct LibraryBlockEditor: View {
 
     private var textBlocksBinding: Binding<[Block]> {
         Binding(
-            get: { blocks.filter { $0.type != .table } },
+            get: { blocks.filter { $0.type != .table && $0.type != .image } },
             set: { newText in
                 var merged = newText
-                merged.append(contentsOf: blocks.filter { $0.type == .table })
+                merged.append(contentsOf: blocks.filter { $0.type == .table || $0.type == .image })
                 blocks = merged
             }
         )
@@ -3245,6 +3282,7 @@ private final class JottLibraryTextView: NSTextView {
     var onCommandShiftK: (() -> Void)? = nil
     var onCommandShiftX: (() -> Void)? = nil
     var onBackspaceOnEmpty: (() -> Void)? = nil
+    var onUndo: (() -> Void)? = nil
     
     var lastKnownSelectedRange = NSRange(location: 0, length: 0)
 
@@ -3294,6 +3332,8 @@ private final class JottLibraryTextView: NSTextView {
             if let onBackspaceOnEmpty = onBackspaceOnEmpty { onBackspaceOnEmpty(); return true }
         }
 
+
+
         // Tab auto-completes partial slash commands (e.g. /sea<Tab> → /search )
         if event.keyCode == 48,
            !hasCommand, !hasShift, !modifiers.contains(.option), !modifiers.contains(.control),
@@ -3340,6 +3380,7 @@ private final class JottLibraryTextView: NSTextView {
 private let kJBType    = NSAttributedString.Key("JottBlockType")
 private let kJBLevel   = NSAttributedString.Key("JottBlockLevel")
 private let kJBChecked = NSAttributedString.Key("JottBlockChecked")
+private let kJBImageURL = NSAttributedString.Key("JottBlockImageURL")
 
 struct LibraryNoteTextEditor: NSViewRepresentable {
     @Binding var blocks: [Block]
@@ -3358,6 +3399,7 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
     var onClearTagFilterShortcut: (() -> Void)? = nil
     var onClearClipboardShortcut: (() -> Void)? = nil
     var onBackspaceOnEmpty: (() -> Void)? = nil
+    var onUndo: (() -> Void)? = nil
     var onHeightChange: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -3397,6 +3439,7 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         tv.onCommandShiftK = onClearTagFilterShortcut
         tv.onCommandShiftX = onClearClipboardShortcut
         tv.onBackspaceOnEmpty = onBackspaceOnEmpty
+        tv.onUndo = onUndo
         
         context.coordinator.load(blocks, into: tv)
         DispatchQueue.main.async {
@@ -3417,6 +3460,7 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         tv.onCommandShiftK = onClearTagFilterShortcut
         tv.onCommandShiftX = onClearClipboardShortcut
         tv.onBackspaceOnEmpty = onBackspaceOnEmpty
+        tv.onUndo = onUndo
         
         if isFocused && tv.window?.firstResponder != tv {
             DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
@@ -3428,7 +3472,12 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         let proposed = context.coordinator.displayString(for: blocks)
         let current = context.coordinator.withoutTrailingNewlines(tv.string)
         let comparableProposed = context.coordinator.withoutTrailingNewlines(proposed)
-        if current != comparableProposed { context.coordinator.load(blocks, into: tv) }
+        if current != comparableProposed {
+            context.coordinator.load(blocks, into: tv)
+            DispatchQueue.main.async {
+                context.coordinator.reportHeight(from: tv)
+            }
+        }
     }
 
     // MARK: Coordinator
@@ -3474,11 +3523,80 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
             var nIdx = 1
             for (i, b) in blocks.enumerated() {
                 if i > 0 { out.append(NSAttributedString(string: "\n", attributes: paraAttrs(parent.isDark))) }
-                let (line, attrs) = lineAndAttrs(b, nIdx: nIdx, dark: parent.isDark)
+                out.append(makeBlockAttrString(b, nIdx: nIdx, dark: parent.isDark))
                 if b.type == .numberedItem { nIdx += 1 } else { nIdx = 1 }
-                out.append(NSAttributedString(string: line, attributes: attrs))
             }
             return out
+        }
+
+        // Builds a fully-attributed NSAttributedString for one block, including per-span bold/italic/etc.
+        private func makeBlockAttrString(_ b: Block, nIdx: Int, dark: Bool) -> NSAttributedString {
+            switch b.type {
+            case .divider:
+                return NSAttributedString(string: "─────────────────────", attributes: dividerAttrs(dark: dark))
+            case .image:
+                let placeholder = b.imageAlt.isEmpty ? " " : b.imageAlt
+                var attrs = paraAttrs(dark)
+                if let url = b.imageURL { attrs[kJBImageURL] = url }
+                attrs[kJBType] = BlockType.image.rawValue
+                return NSAttributedString(string: placeholder, attributes: attrs)
+            default: break
+            }
+
+            let blockAttrs: [NSAttributedString.Key: Any]
+            let prefix: String
+            switch b.type {
+            case .bulletItem:
+                blockAttrs = listAttrs(indent: 14, type: .bulletItem, dark: dark); prefix = "• "
+            case .numberedItem:
+                blockAttrs = listAttrs(indent: 24, type: .numberedItem, dark: dark); prefix = "\(nIdx). "
+            case .taskItem:
+                blockAttrs = taskAttrs(checked: b.checked, dark: dark)
+                prefix = b.checked ? "☑ " : "☐ "
+            case .quote:
+                blockAttrs = quoteAttrs(dark: dark); prefix = ""
+            case .heading:
+                blockAttrs = headingAttrs(level: b.level, dark: dark); prefix = ""
+            default:
+                blockAttrs = paraAttrs(dark); prefix = ""
+            }
+
+            let out = NSMutableAttributedString()
+            if !prefix.isEmpty {
+                out.append(NSAttributedString(string: prefix, attributes: blockAttrs))
+            }
+            let baseFont = (blockAttrs[.font] as? NSFont) ?? NSFont.systemFont(ofSize: 14)
+            for span in b.spans.isEmpty ? [TextSpan("")] : b.spans {
+                out.append(attributedSpan(span, blockAttrs: blockAttrs, baseFont: baseFont))
+            }
+            return out
+        }
+
+        private func attributedSpan(_ span: TextSpan, blockAttrs: [NSAttributedString.Key: Any], baseFont: NSFont) -> NSAttributedString {
+            var attrs = blockAttrs
+            attrs[.font] = spanFont(span, base: baseFont)
+            if span.underline     { attrs[.underlineStyle]     = NSUnderlineStyle.single.rawValue }
+            if span.strikethrough { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if span.highlight     { attrs[.backgroundColor]    = NSColor.yellow.withAlphaComponent(0.35) }
+            if span.code          { attrs[.backgroundColor]    = NSColor(white: 1, alpha: 0.07) }
+            return NSAttributedString(string: span.text, attributes: attrs)
+        }
+
+        private func spanFont(_ span: TextSpan, base: NSFont) -> NSFont {
+            if span.code { return NSFont.monospacedSystemFont(ofSize: base.pointSize - 1, weight: .regular) }
+            var traits = base.fontDescriptor.symbolicTraits
+            if span.bold   { traits.insert(.bold) }
+            if span.italic { traits.insert(.italic) }
+            guard traits != base.fontDescriptor.symbolicTraits else { return base }
+            let desc = base.fontDescriptor.withSymbolicTraits(traits)
+            return NSFont(descriptor: desc, size: base.pointSize) ?? base
+        }
+
+        private func toggleFontTrait(_ trait: NSFontDescriptor.SymbolicTraits, on font: NSFont, remove: Bool) -> NSFont {
+            var traits = font.fontDescriptor.symbolicTraits
+            if remove { traits.remove(trait) } else { traits.insert(trait) }
+            let desc = font.fontDescriptor.withSymbolicTraits(traits)
+            return NSFont(descriptor: desc, size: font.pointSize) ?? font
         }
 
         // MARK: Display string (used only for change detection)
@@ -3499,6 +3617,9 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
                 case .divider:
                     n = 1
                     return "─────────────────────"
+                case .image:
+                    n = 1
+                    return b.imageAlt.isEmpty ? " " : b.imageAlt
                 default:
                     n = 1
                     return b.plainText
@@ -3525,6 +3646,12 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
                 return (content, quoteAttrs(dark: dark))
             case .divider:
                 return ("─────────────────────", dividerAttrs(dark: dark))
+            case .image:
+                let placeholder = b.imageAlt.isEmpty ? " " : b.imageAlt
+                var attrs = paraAttrs(dark)
+                if let url = b.imageURL { attrs[kJBImageURL] = url }
+                attrs[kJBType] = BlockType.image.rawValue
+                return (placeholder, attrs)
             default:
                 return (b.plainText, paraAttrs(dark))
             }
@@ -3542,39 +3669,98 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
                 let lineNSRange = NSRange(location: pr.location, length: pr.length - (hasNL ? 1 : 0))
                 let line = str.substring(with: lineNSRange)
 
-                let attrs = safeAttributes(in: storage, at: pr.location)
-                let typeRaw = attrs[kJBType] as? String ?? BlockType.paragraph.rawValue
-                let btype   = BlockType(rawValue: typeRaw) ?? .paragraph
-                let level   = attrs[kJBLevel]   as? Int  ?? 1
-                let checked = attrs[kJBChecked] as? Bool ?? false
+                let blockAttrs = safeAttributes(in: storage, at: pr.location)
+                let typeRaw  = blockAttrs[kJBType]    as? String ?? BlockType.paragraph.rawValue
+                let btype    = BlockType(rawValue: typeRaw) ?? .paragraph
+                let level    = blockAttrs[kJBLevel]   as? Int  ?? 1
+                let checked  = blockAttrs[kJBChecked] as? Bool ?? false
+                let imageURL = blockAttrs[kJBImageURL] as? String
+                let baseFont = (blockAttrs[.font] as? NSFont) ?? NSFont.systemFont(ofSize: 14)
 
-                result.append(blockFromDisplayedLine(line, type: btype, level: level, checked: checked))
+                if btype == .divider {
+                    result.append(Block(type: .divider))
+                } else if btype == .image {
+                    result.append(Block(type: .image, imageURL: imageURL, imageAlt: line))
+                } else {
+                    let prefixLen = structuralPrefixLen(for: btype, in: line)
+                    let contentStart = lineNSRange.location + prefixLen
+                    let contentLen   = max(0, lineNSRange.length - prefixLen)
+                    let contentRange = NSRange(location: contentStart, length: contentLen)
+                    let isCheckedLine = line.hasPrefix("☑ ")
+                    let spans = contentRange.length > 0
+                        ? spansFromStorage(storage, range: contentRange, baseFont: baseFont, isChecked: checked)
+                        : [TextSpan("")]
+                    switch btype {
+                    case .taskItem: result.append(Block(type: .taskItem, spans: spans, checked: isCheckedLine || checked))
+                    case .heading:  result.append(Block(type: .heading,  spans: spans, level: max(1, min(level, 3))))
+                    default:        result.append(Block(type: btype, spans: spans))
+                    }
+                }
                 loc = NSMaxRange(pr)
             }
             return result.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : result
         }
 
-        func blockFromDisplayedLine(_ line: String, type: BlockType, level: Int, checked: Bool) -> Block {
+        private func structuralPrefixLen(for type: BlockType, in line: String) -> Int {
+            switch type {
+            case .bulletItem: return line.hasPrefix("• ") ? 2 : 0
+            case .numberedItem:
+                if let r = line.range(of: #"^\d+\. "#, options: .regularExpression) {
+                    return line.distance(from: line.startIndex, to: r.upperBound)
+                }
+                return 0
+            case .taskItem: return (line.hasPrefix("☑ ") || line.hasPrefix("☐ ")) ? 2 : 0
+            default: return 0
+            }
+        }
+
+        private func spansFromStorage(_ storage: NSTextStorage, range: NSRange, baseFont: NSFont, isChecked: Bool) -> [TextSpan] {
+            let baseTraits = baseFont.fontDescriptor.symbolicTraits
+            var spans: [TextSpan] = []
+            storage.enumerateAttributes(in: range, options: []) { attrs, r, _ in
+                let text = (storage.string as NSString).substring(with: r)
+                var span = TextSpan(text)
+                if let font = attrs[.font] as? NSFont {
+                    let traits = font.fontDescriptor.symbolicTraits
+                    span.bold   = traits.contains(.bold)   && !baseTraits.contains(.bold)
+                    span.italic = traits.contains(.italic) && !baseTraits.contains(.italic)
+                    span.code   = font.isFixedPitch && !baseFont.isFixedPitch
+                }
+                // obliqueness used by legacy italic path
+                if let obl = attrs[.obliqueness] as? NSNumber, obl.floatValue > 0 { span.italic = true }
+                if let u = attrs[.underlineStyle]     as? Int, u != 0 { span.underline     = true }
+                if !isChecked, let s = attrs[.strikethroughStyle] as? Int, s != 0 { span.strikethrough = true }
+                if !span.code, attrs[.backgroundColor] != nil          { span.highlight    = true }
+                spans.append(span)
+            }
+            return spans.isEmpty ? [TextSpan("")] : spans
+        }
+
+        func blockFromDisplayedLine(_ line: String, type: BlockType, level: Int, checked: Bool, imageURL: String? = nil) -> Block {
             switch type {
             case .heading:
-                return Block(type: .heading, spans: [TextSpan(line)], level: max(1, min(level, 3)))
+                let t = line.hasPrefix("# ") ? String(line.dropFirst(2)) : line
+                return Block(type: .heading, spans: Block.parseInlineMarkdown(t), level: max(1, min(level, 3)))
             case .bulletItem:
                 let t = line.hasPrefix("• ") ? String(line.dropFirst(2)) : line
-                return Block(type: .bulletItem, spans: [TextSpan(t)])
+                return Block(type: .bulletItem, spans: Block.parseInlineMarkdown(t))
             case .numberedItem:
                 let t: String
                 if let r = line.range(of: #"^\d+\. "#, options: .regularExpression) { t = String(line[r.upperBound...]) } else { t = line }
-                return Block(type: .numberedItem, spans: [TextSpan(t)])
+                return Block(type: .numberedItem, spans: Block.parseInlineMarkdown(t))
             case .taskItem:
                 let isChecked = line.hasPrefix("☑ ")
                 let t = (line.hasPrefix("☑ ") || line.hasPrefix("☐ ")) ? String(line.dropFirst(2)) : line
-                return Block(type: .taskItem, spans: [TextSpan(t)], checked: isChecked || checked)
+                return Block(type: .taskItem, spans: Block.parseInlineMarkdown(t), checked: isChecked || checked)
             case .quote:
-                return Block(type: .quote, spans: [TextSpan(line)])
+                let t = line.hasPrefix("❝ ") ? String(line.dropFirst(2)) : line
+                return Block(type: .quote, spans: Block.parseInlineMarkdown(t))
             case .divider:
                 return Block(type: .divider)
+            case .image:
+                return Block(type: .image, imageURL: imageURL, imageAlt: line)
             default:
-                return Block(type: .paragraph, spans: [TextSpan(line)])
+                return Block(type: .paragraph, spans: Block.parseInlineMarkdown(line))
             }
         }
 
@@ -3737,7 +3923,8 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
             case .bold:
                 return (attrs[.font] as? NSFont)?.fontDescriptor.symbolicTraits.contains(.bold) ?? false
             case .italic:
-                return (attrs[.obliqueness] as? NSNumber)?.floatValue ?? 0 > 0
+                return (attrs[.font] as? NSFont)?.fontDescriptor.symbolicTraits.contains(.italic) ?? false
+                    || (attrs[.obliqueness] as? NSNumber)?.floatValue ?? 0 > 0
             case .underline:
                 return (attrs[.underlineStyle] as? NSNumber)?.intValue ?? 0 != 0
             case .strikethrough:
@@ -3750,44 +3937,73 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
 
         func applyInlineFormat(_ cmd: JottTextFormatCommand, in tv: NSTextView) {
             guard let storage = tv.textStorage else { return }
-            let sel = stableSelectedRange(in: tv)
 
-            // Nothing selected → just toggle typing attributes for next typed chars
-            if sel.length == 0 {
-                var ta = tv.typingAttributes
-                let active = isInlineActive(cmd, in: tv)
-                let inlineAttrs = inlineFormatAttrs(cmd)
-                if active {
-                    for key in inlineAttrs.keys { ta.removeValue(forKey: key) }
-                    // Restore base font when removing bold/italic/code
-                    if cmd == .bold || cmd == .italic || cmd == .inlineCode {
-                        ta[.font] = NSFont.systemFont(ofSize: 14)
-                    }
-                } else {
-                    for (k, v) in inlineAttrs { ta[k] = v }
-                }
-                tv.typingAttributes = ta
+            if cmd == .link {
+                let sel = stableSelectedRange(in: tv)
+                let selected = sel.length > 0 ? (tv.string as NSString).substring(with: sel) : ""
+                let replacement = sel.length > 0 ? "[\(selected)](url)" : "[](url)"
+                tv.insertText(replacement, replacementRange: sel)
+                tv.setSelectedRange(NSRange(location: sel.location + 1, length: 0))
+                suppressSync = true
+                let newBlocks = extractBlocks(from: storage)
+                if parent.blocks != newBlocks { parent.blocks = newBlocks }
+                suppressSync = false
                 return
             }
 
-            // Has selection → toggle on the range
-            let active = isInlineActive(cmd, in: tv)
-            let inlineAttrs = inlineFormatAttrs(cmd)
-            suppressSync = true
+            let sel = stableSelectedRange(in: tv)
+            guard sel.length > 0 else { return }
+
+            // Snapshot attributes before change so Cmd+Z can restore them
+            let snapshot = storage.attributedSubstring(from: sel)
+            tv.undoManager?.registerUndo(withTarget: storage) { [weak tv, snapshot] _ in
+                guard let tv, let storage = tv.textStorage else { return }
+                storage.beginEditing()
+                storage.replaceCharacters(in: sel, with: snapshot)
+                storage.endEditing()
+                tv.setSelectedRange(sel)
+            }
+            tv.undoManager?.setActionName("Formatting")
+
+            let isActive = isInlineActive(cmd, in: tv)
             storage.beginEditing()
-            if active {
-                for key in inlineAttrs.keys { storage.removeAttribute(key, range: sel) }
-                if cmd == .bold || cmd == .italic || cmd == .inlineCode {
-                    storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 14), range: sel)
+            storage.enumerateAttributes(in: sel, options: []) { attrs, r, _ in
+                let baseFont = (attrs[.font] as? NSFont) ?? NSFont.systemFont(ofSize: 14)
+                switch cmd {
+                case .bold:
+                    storage.addAttribute(.font, value: toggleFontTrait(.bold, on: baseFont, remove: isActive), range: r)
+                case .italic:
+                    storage.addAttribute(.font, value: toggleFontTrait(.italic, on: baseFont, remove: isActive), range: r)
+                    storage.removeAttribute(.obliqueness, range: r)
+                case .underline:
+                    if isActive { storage.removeAttribute(.underlineStyle, range: r) }
+                    else { storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: r) }
+                case .strikethrough:
+                    if isActive { storage.removeAttribute(.strikethroughStyle, range: r) }
+                    else { storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: r) }
+                case .highlight:
+                    if isActive { storage.removeAttribute(.backgroundColor, range: r) }
+                    else { storage.addAttribute(.backgroundColor, value: NSColor.yellow.withAlphaComponent(0.35), range: r) }
+                case .inlineCode:
+                    if isActive {
+                        let restored = toggleFontTrait(.monoSpace, on: baseFont, remove: true)
+                        storage.addAttribute(.font, value: restored, range: r)
+                        storage.removeAttribute(.backgroundColor, range: r)
+                    } else {
+                        let codeFont = NSFont.monospacedSystemFont(ofSize: max(baseFont.pointSize - 1, 11), weight: .regular)
+                        storage.addAttribute(.font, value: codeFont, range: r)
+                        storage.addAttribute(.backgroundColor, value: NSColor(white: 1, alpha: 0.07), range: r)
+                    }
+                default: break
                 }
-            } else {
-                for (k, v) in inlineAttrs { storage.addAttribute(k, value: v, range: sel) }
             }
             storage.endEditing()
+            tv.setSelectedRange(sel)
+
+            suppressSync = true
             let newBlocks = extractBlocks(from: storage)
             if parent.blocks != newBlocks { parent.blocks = newBlocks }
             suppressSync = false
-            tv.setSelectedRange(sel)
         }
 
         /// Returns the BlockType of the paragraph at the current cursor

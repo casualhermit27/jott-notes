@@ -82,6 +82,94 @@ enum JottTextFormatting {
         if let handler = JottTextFormattingRegistry.libraryFormatHandler {
             if handler(command) { return true }
         }
+
+        // Suppress binding sync during formatting to avoid SwiftUI reset race
+        let wasSuppressing = (tv.delegate as? JottNativeInput.Coordinator)?.suppressSync ?? false
+        (tv.delegate as? JottNativeInput.Coordinator)?.suppressSync = true
+        defer { (tv.delegate as? JottNativeInput.Coordinator)?.suppressSync = wasSuppressing }
+
+        let sel = tv.selectedRange()
+        let nsText = tv.string as NSString
+
+        if command == .bold || command == .italic || command == .underline || command == .strikethrough || command == .highlight || command == .inlineCode {
+            let marker: String
+            if command == .bold { marker = "**" }
+            else if command == .italic { marker = "*" }
+            else if command == .underline { marker = "__" }
+            else if command == .strikethrough { marker = "~~" }
+            else if command == .highlight { marker = "==" }
+            else { marker = "`" }
+
+            if sel.length > 0 {
+                let selected = nsText.substring(with: sel)
+                if selected.hasPrefix(marker) && selected.hasSuffix(marker) {
+                    let inner = String(selected.dropFirst(marker.count).dropLast(marker.count))
+                    tv.insertText(inner, replacementRange: sel)
+                } else {
+                    tv.insertText("\(marker)\(selected)\(marker)", replacementRange: sel)
+                }
+            } else {
+                tv.insertText("\(marker)\(marker)", replacementRange: sel)
+                tv.setSelectedRange(NSRange(location: sel.location + marker.count, length: 0))
+            }
+            return true
+        }
+
+        if command == .heading || command == .bulletList || command == .numberedList || command == .taskList || command == .quote {
+            let prefix: String
+            if command == .heading { prefix = "# " }
+            else if command == .bulletList { prefix = "• " }
+            else if command == .numberedList { prefix = "1. " }
+            else if command == .taskList { prefix = "☐ " }
+            else { prefix = "❝ " }
+
+            let cursor = sel.location
+            let lineRange = nsText.lineRange(for: NSRange(location: cursor, length: 0))
+            let line = nsText.substring(with: lineRange)
+
+            let newLine: String
+            if line.hasPrefix(prefix) {
+                newLine = String(line.dropFirst(prefix.count))
+            } else {
+                var stripped = line
+                for p in ["• ", "☐ ", "☑ ", "❝ ", "# ", "## ", "1. "] where stripped.hasPrefix(p) {
+                    stripped = String(stripped.dropFirst(p.count))
+                    break
+                }
+                if let range = stripped.range(of: #"^\d+\. "#, options: .regularExpression) {
+                    stripped = String(stripped[range.upperBound...])
+                }
+                newLine = prefix + stripped
+            }
+
+            tv.insertText(newLine, replacementRange: lineRange)
+            let newCursor = lineRange.location + (newLine as NSString).length
+            tv.setSelectedRange(NSRange(location: newCursor, length: 0))
+            return true
+        }
+
+        if command == .codeBlock {
+            if sel.length > 0 {
+                let selected = nsText.substring(with: sel)
+                tv.insertText("```\n\(selected)\n```", replacementRange: sel)
+            } else {
+                tv.insertText("```\n\n```", replacementRange: sel)
+                tv.setSelectedRange(NSRange(location: sel.location + 4, length: 0))
+            }
+            return true
+        }
+
+        if command == .link {
+            if sel.length > 0 {
+                let selected = nsText.substring(with: sel)
+                tv.insertText("[\(selected)](url)", replacementRange: sel)
+            } else {
+                tv.insertText("[](url)", replacementRange: sel)
+                tv.setSelectedRange(NSRange(location: sel.location + 1, length: 0))
+            }
+            return true
+        }
+
         return false
     }
 }
@@ -287,6 +375,7 @@ struct JottCaptureView: View {
     @State private var showHelp = false
     @State private var dropdownReady = false
     @AppStorage("jott_hasSeenWelcome") private var hasSeenWelcome: Bool = false
+    @AppStorage("jott_autoPasteClipboard") private var autoPasteClipboard: Bool = false
 
     @ObservedObject private var speech = SpeechManager.shared
     @State private var voicePrefix = ""
@@ -439,7 +528,7 @@ struct JottCaptureView: View {
                 ))
             }
 
-            if viewModel.clipboardPrefilled {
+            if viewModel.clipboardPrefilled, !autoPasteClipboard {
                 clipboardOfferButton
             }
 
@@ -464,10 +553,13 @@ struct JottCaptureView: View {
 
     @ViewBuilder private var clipboardOfferButton: some View {
         Button(action: {
-            if let textView = JottNSTextView.activeTextView,
-               textView.insertTransfer(from: NSPasteboard.general) {
-                textView.window?.makeFirstResponder(textView)
+            if viewModel.pendingClipboardKind == .image {
+                if let token = JottTransferPayload.imageToken(from: NSPasteboard.general) {
+                    viewModel.inputText = JottTransferPayload.merged(token, into: viewModel.inputText)
+                }
                 viewModel.clearClipboardPrefill()
+            } else {
+                viewModel.insertPendingClipboardText()
             }
         }) {
             HStack(spacing: 5) {
@@ -873,6 +965,9 @@ struct JottInputArea: View {
                             } else {
                                 viewModel.clearForcedType()
                             }
+                        },
+                        onUndo: {
+                            viewModel.undo()
                         },
                         onHeightChange: handleHeightChange
                     )
@@ -2893,11 +2988,6 @@ final class JottDropReceivingView: NSView {
     }
 }
 
-private extension NSAttributedString.Key {
-    /// Marks ghost-text ranges in JottNativeInput so extractText can skip them.
-    static let jottGhost = NSAttributedString.Key("com.jott.ghostText")
-}
-
 struct JottNativeInput: NSViewRepresentable {
     @Binding var text: String
     let viewModel: OverlayViewModel
@@ -2911,10 +3001,6 @@ struct JottNativeInput: NSViewRepresentable {
     var onClearClipboardShortcut: (() -> Void)? = nil
     var onBackspaceOnEmpty: (() -> Void)? = nil
     var onHeightChange: ((CGFloat) -> Void)? = nil
-    /// Current AI ghost-text suggestion, shown greyed out after the cursor.
-    var suggestion: String? = nil
-    var onSuggestionAccepted: (() -> Void)? = nil
-    var onSuggestionDismissed: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -2968,7 +3054,6 @@ struct JottNativeInput: NSViewRepresentable {
         context.coordinator.attachIfNeeded(to: scrollView)
 
         let textColor: NSColor = isDark ? NSColor(white: 0.92, alpha: 1) : NSColor.jottInputText
-        let ghostColor: NSColor = isDark ? NSColor(white: 0.72, alpha: 0.42) : NSColor(white: 0.58, alpha: 0.72)
         let placeholderColor: NSColor = isDark
             ? NSColor(white: 0.32, alpha: 1)
             : NSColor(white: 0.74, alpha: 1)
@@ -2977,29 +3062,19 @@ struct JottNativeInput: NSViewRepresentable {
         // Only reset content if the markup doesn't already match (avoids wiping inline images)
         let coord = context.coordinator
 
-        // Extract current actual (non-ghost) markup for comparison
         let currentText = tv.textStorage.map { Coordinator.extractText(from: $0) } ?? tv.string
-        if currentText != text {
+        if !coord.suppressSync && currentText != text {
             if text.isEmpty {
                 tv.textStorage?.setAttributedString(NSAttributedString(string: ""))
-                coord.ghostStart = nil
             } else {
                 tv.textStorage?.setAttributedString(
                     Coordinator.attributedString(from: text, font: editorFont, textColor: textColor)
                 )
-                coord.ghostStart = nil
             }
             DispatchQueue.main.async { [weak tv] in
                 guard let tv else { return }
                 context.coordinator.reportHeight(from: tv)
             }
-        }
-
-        // Apply or remove ghost text at the end of storage
-        let desiredGhost = suggestion ?? ""
-        let currentGhost = coord.currentGhostText(in: tv)
-        if currentGhost != desiredGhost {
-            coord.setGhostText(desiredGhost, in: tv, ghostColor: ghostColor, font: editorFont)
         }
 
         tv.font = editorFont
@@ -3047,63 +3122,12 @@ struct JottNativeInput: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         private var lastReportedHeight: CGFloat = 0
         private var isApplyingAttributes = false
+        var suppressSync = false
         private static let inlineImageRegex = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#)
         init(_ p: JottNativeInput) { parent = p }
 
         func attachIfNeeded(to scrollView: NSScrollView) {
             self.scrollView = scrollView
-        }
-
-        // MARK: - Ghost text helpers
-
-        /// UTF-16 offset where ghost text begins in the storage. nil = no ghost.
-        var ghostStart: Int? = nil
-
-        func currentGhostText(in tv: NSTextView) -> String {
-            guard let gs = ghostStart, let storage = tv.textStorage, gs < storage.length else { return "" }
-            return (storage.string as NSString).substring(from: gs)
-        }
-
-        func setGhostText(_ ghost: String, in tv: NSTextView,
-                          ghostColor: NSColor, font: NSFont) {
-            guard let storage = tv.textStorage else { return }
-            // Strip any existing ghost
-            if let gs = ghostStart, gs < storage.length {
-                storage.deleteCharacters(in: NSRange(location: gs, length: storage.length - gs))
-            }
-            ghostStart = nil
-            guard !ghost.isEmpty else { return }
-            let gs = storage.length
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: ghostColor,
-                .jottGhost: true
-            ]
-            storage.append(NSAttributedString(string: ghost, attributes: attrs))
-            ghostStart = gs
-        }
-
-        func stripGhostText(from tv: NSTextView) {
-            guard let gs = ghostStart, let storage = tv.textStorage, gs < storage.length else {
-                ghostStart = nil
-                return
-            }
-            storage.deleteCharacters(in: NSRange(location: gs, length: storage.length - gs))
-            ghostStart = nil
-        }
-
-        func acceptGhostSuggestion(in tv: NSTextView) {
-            guard let gs = ghostStart, let storage = tv.textStorage, gs < storage.length else { return }
-            let ghostRange = NSRange(location: gs, length: storage.length - gs)
-            // Re-attribute ghost run as real text (use text color from parent)
-            let isDark = parent.isDark
-            let realColor: NSColor = isDark ? NSColor(white: 0.92, alpha: 1) : NSColor.jottInputText
-            storage.removeAttribute(.jottGhost, range: ghostRange)
-            storage.addAttribute(.foregroundColor, value: realColor, range: ghostRange)
-            ghostStart = nil
-            parent.text = Self.extractText(from: storage)
-            parent.onSuggestionAccepted?()
-            tv.setSelectedRange(NSRange(location: storage.length, length: 0))
         }
 
         func reportHeight(from tv: NSTextView) {
@@ -3184,14 +3208,11 @@ struct JottNativeInput: NSViewRepresentable {
         }
 
         /// Converts the textStorage content back to markup, replacing ImageTextAttachments.
-        /// Skips any ranges marked with .jottGhost (AI suggestion text).
         static func extractText(from storage: NSTextStorage) -> String {
             var result = ""
             storage.enumerateAttributes(
                 in: NSRange(location: 0, length: storage.length), options: []
             ) { attrs, range, _ in
-                // Skip ghost text
-                if attrs[.jottGhost] != nil { return }
                 if let att = attrs[.attachment] as? ImageTextAttachment {
                     result += "![](\(att.attachmentPath))"
                 } else {
@@ -3209,11 +3230,6 @@ struct JottNativeInput: NSViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementString: String?) -> Bool {
             JottTextFormattingRegistry.activeTextView = tv
-            // Strip ghost text before any real edit so extractText stays clean
-            if ghostStart != nil {
-                stripGhostText(from: tv)
-                DispatchQueue.main.async { self.parent.onSuggestionDismissed?() }
-            }
             return true
         }
 
@@ -3300,15 +3316,6 @@ struct JottNativeInput: NSViewRepresentable {
         }
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
-            if sel == #selector(NSResponder.insertTab(_:)), ghostStart != nil {
-                acceptGhostSuggestion(in: tv)
-                return true
-            }
-            if sel == #selector(NSResponder.cancelOperation(_:)), ghostStart != nil {
-                stripGhostText(from: tv)
-                parent.onSuggestionDismissed?()
-                return true
-            }
             // Enter or Shift+Enter → insert a newline, continuing list if on a list line
             if sel == #selector(NSResponder.insertNewline(_:)) ||
                sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
@@ -3439,14 +3446,6 @@ struct JottNativeInput: NSViewRepresentable {
             return false
         }
 
-        func textViewDidChangeSelection(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView,
-                  let gs = ghostStart else { return }
-            let sel = tv.selectedRange()
-            if sel.location > gs {
-                tv.setSelectedRange(NSRange(location: gs, length: 0))
-            }
-        }
     }
 }
 

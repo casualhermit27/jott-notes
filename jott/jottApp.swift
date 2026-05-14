@@ -20,7 +20,7 @@ struct jottApp: App {
     @StateObject private var menuBarStore = MenuBarStore()
 
     init() {
-        PurchaseManager.shared.configure(apiKey: "test_xmAJDfyOTyKQcXPoxyezuXAidIO")
+        PurchaseManager.shared.configure(apiKey: "appl_XYLhrMbEstcWOKXePgCkTxXslcB")
     }
 
     var body: some Scene {

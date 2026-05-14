@@ -11,10 +11,13 @@ final class PurchaseManager: ObservableObject {
     @Published private(set) var offerings: Offerings?
 
     private let entitlementID = "pro"
+    private static var didConfigure = false
 
     private init() {}
 
     func configure(apiKey: String) {
+        guard !Self.didConfigure else { return }
+        Self.didConfigure = true
         Purchases.configure(withAPIKey: apiKey)
         Purchases.shared.delegate = PurchaseDelegate.shared
         Task { await refresh() }

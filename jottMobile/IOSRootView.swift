@@ -33,6 +33,12 @@ struct IOSRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jottShowPaywall)) { _ in
             showPaywall = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .jottOpenCapture)) { _ in
+            quickCapture.requestCapture()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jottOpenSearch)) { _ in
+            NotificationCenter.default.post(name: .jottFocusSearch, object: nil)
+        }
         .fullScreenCover(isPresented: $showRequestedNewNote) {
             IOSNewNoteComposerView(
                 title: "New Note",

@@ -3,6 +3,7 @@ import Foundation
 import AppKit
 #endif
 import Combine
+import CoreSpotlight
 
 @MainActor
 final class NoteStore: ObservableObject {
@@ -109,6 +110,7 @@ final class NoteStore: ObservableObject {
         }
         load()
         migrateFromJSON()
+        rebuildSpotlightIndex()
         CloudKitSyncManager.shared.sync(store: self)
     }
 
@@ -585,6 +587,7 @@ final class NoteStore: ObservableObject {
         if syncToCloud {
             CloudKitSyncManager.shared.push(note: note)
         }
+        indexNoteInSpotlight(note)
         objectWillChange.send()
     }
 
@@ -648,6 +651,7 @@ final class NoteStore: ObservableObject {
         if syncToCloud {
             CloudKitSyncManager.shared.push(note: notesCache[idx])
         }
+        removeNoteFromSpotlight(id)
         objectWillChange.send()
     }
 
@@ -659,6 +663,7 @@ final class NoteStore: ObservableObject {
         if syncToCloud {
             CloudKitSyncManager.shared.push(note: notesCache[idx])
         }
+        indexNoteInSpotlight(notesCache[idx])
         objectWillChange.send()
     }
 
@@ -684,6 +689,7 @@ final class NoteStore: ObservableObject {
         if syncToCloud {
             CloudKitSyncManager.shared.purgeNote(id: id, modifiedAt: Date())
         }
+        removeNoteFromSpotlight(id)
         objectWillChange.send()
     }
 
@@ -1072,6 +1078,143 @@ final class NoteStore: ObservableObject {
         folders = latest.values.sorted { $0.createdAt < $1.createdAt }
     }
 
+
+    // MARK: - Spotlight
+
+    private let searchableIndex = CSSearchableIndex(name: "com.casualhermit.jott.notes")
+
+    private func indexNoteInSpotlight(_ note: Note) {
+        let attributeSet = CSSearchableItemAttributeSet(contentType: .text)
+        attributeSet.title = note.title
+        attributeSet.contentDescription = note.plainText
+        attributeSet.keywords = note.tags
+        attributeSet.contentCreationDate = note.timestamp
+        attributeSet.contentModificationDate = note.modifiedAt
+
+        let item = CSSearchableItem(
+            uniqueIdentifier: note.id.uuidString,
+            domainIdentifier: "note",
+            attributeSet: attributeSet
+        )
+
+        searchableIndex.indexSearchableItems([item]) { error in
+            if let error { NSLog("[Jott] Spotlight index error: \(error)") }
+        }
+    }
+
+    private func removeNoteFromSpotlight(_ noteId: UUID) {
+        searchableIndex.deleteSearchableItems(withIdentifiers: [noteId.uuidString]) { error in
+            if let error { NSLog("[Jott] Spotlight delete error: \(error)") }
+        }
+    }
+
+    private func rebuildSpotlightIndex() {
+        let items = activeNotes().map { note -> CSSearchableItem in
+            let attributeSet = CSSearchableItemAttributeSet(contentType: .text)
+            attributeSet.title = note.title
+            attributeSet.contentDescription = note.plainText
+            attributeSet.keywords = note.tags
+            attributeSet.contentCreationDate = note.timestamp
+            attributeSet.contentModificationDate = note.modifiedAt
+            return CSSearchableItem(
+                uniqueIdentifier: note.id.uuidString,
+                domainIdentifier: "note",
+                attributeSet: attributeSet
+            )
+        }
+        searchableIndex.indexSearchableItems(items) { error in
+            if let error { NSLog("[Jott] Spotlight rebuild error: \(error)") }
+        }
+    }
+
+    // MARK: - Export
+
+    /// Exports all notes as Markdown files inside a ZIP archive.
+    /// Returns the URL of the created ZIP file, or nil if creation failed.
+    func exportAllNotesAsZip() -> URL? {
+        let exportDir = FileManager.default.temporaryDirectory.appendingPathComponent("jott-export-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+
+        for note in activeNotes() {
+            let markdown = noteToMarkdown(note)
+            let safeTitle = note.title.replacingOccurrences(of: "/", with: "-")
+            let filename = "\(safeTitle).md"
+            let fileURL = exportDir.appendingPathComponent(filename)
+            try? markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+
+        let zipURL = FileManager.default.temporaryDirectory.appendingPathComponent("jott-export-\(Int(Date().timeIntervalSince1970)).zip")
+        do {
+            let coordinator = NSFileCoordinator()
+            var zipError: NSError?
+            coordinator.coordinate(readingItemAt: exportDir, options: .forUploading, error: &zipError) { url in
+                try? FileManager.default.moveItem(at: url, to: zipURL)
+            }
+            if FileManager.default.fileExists(atPath: zipURL.path) {
+                return zipURL
+            }
+        }
+        return nil
+    }
+
+    func exportNoteAsMarkdown(_ note: Note) -> URL? {
+        let markdown = noteToMarkdown(note)
+        let safeTitle = note.title.replacingOccurrences(of: "/", with: "-")
+        let filename = "\(safeTitle).md"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
+    private func noteToMarkdown(_ note: Note) -> String {
+        var lines: [String] = []
+        if !note.tags.isEmpty {
+            lines.append(note.tags.map { "#\($0)" }.joined(separator: " "))
+            lines.append("")
+        }
+        for block in note.blocks {
+            switch block.type {
+            case .paragraph:
+                lines.append(block.plainText)
+            case .heading:
+                let prefix = String(repeating: "#", count: min(block.level, 6))
+                lines.append("\(prefix) \(block.plainText)")
+            case .bulletItem:
+                lines.append("- \(block.plainText)")
+            case .numberedItem:
+                lines.append("1. \(block.plainText)")
+            case .taskItem:
+                lines.append("- [\(block.checked ? "x" : " ")] \(block.plainText)")
+            case .quote:
+                lines.append("> \(block.plainText)")
+            case .codeBlock:
+                lines.append("```")
+                lines.append(block.plainText)
+                lines.append("```")
+            case .divider:
+                lines.append("---")
+            case .table:
+                if !block.tableHeaders.isEmpty {
+                    lines.append("| \(block.tableHeaders.joined(separator: " | ")) |")
+                    lines.append("| \(block.tableHeaders.map { _ in "---" }.joined(separator: " | ")) |")
+                    for row in block.tableRows {
+                        lines.append("| \(row.joined(separator: " | ")) |")
+                    }
+                }
+            case .toggle:
+                lines.append("<details><summary>\(block.plainText)</summary>")
+                lines.append(block.plainText)
+                lines.append("</details>")
+            case .image:
+                break
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
 
 #if DEBUG
     /// Test-only helper to reload persisted content from disk.

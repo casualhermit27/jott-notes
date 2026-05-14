@@ -33,7 +33,8 @@ final class OverlayViewModel: ObservableObject {
             let current = _inputText
             guard current != _cachedInputText else { return }
             _cachedInputText = current
-            
+            pushUndoState(current)
+
             guard !isProcessing else { return }
             isProcessing = true
             defer { isProcessing = false }
@@ -47,6 +48,31 @@ final class OverlayViewModel: ObservableObject {
     
     private var _cachedInputText: String = ""
     private var _inputText: String { inputBlocks.map(\.plainText).joined(separator: "\n") }
+
+    // MARK: - Undo stack (last 5 input states)
+    private var undoStack: [String] = []
+    private let maxUndoDepth = 5
+    private var isUndoing = false
+
+    private func pushUndoState(_ text: String) {
+        guard !isUndoing else { return }
+        if undoStack.last == text { return }
+        undoStack.append(text)
+        if undoStack.count > maxUndoDepth {
+            undoStack.removeFirst()
+        }
+    }
+
+    func undo() {
+        guard undoStack.count > 1 else { return }
+        _ = undoStack.popLast() // remove current state
+        guard let previous = undoStack.last else { return }
+        isUndoing = true
+        inputText = previous
+        isUndoing = false
+    }
+
+    var canUndo: Bool { undoStack.count > 1 }
     
     var inputText: String {
         get { _inputText }
@@ -484,6 +510,15 @@ final class OverlayViewModel: ObservableObject {
         pendingClipboardKind = ClipboardMonitor.shared.peekKind()
         pendingClipboardText = ClipboardMonitor.shared.peek()
         clipboardPrefilled = pendingClipboardKind != nil
+
+        // Auto-paste clipboard content if setting is enabled
+        if UserDefaults.standard.bool(forKey: "jott_autoPasteClipboard"),
+           clipboardPrefilled {
+            DispatchQueue.main.async { [weak self] in
+                self?.insertPendingClipboardText()
+            }
+        }
+
         isVisible = true
     }
 

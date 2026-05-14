@@ -25,11 +25,21 @@
 		AA00D00E00000000000000CC /* jott/Model/Block.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00E00000000000000BB /* jott/Model/Block.swift */; };
 		AA00D01000000000000000CC /* jott/Model/SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C01000000000000000BB /* jott/Model/SpeechManager.swift */; };
 		AA00E00100000000000000DD /* jott/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00E00200000000000000DD /* jott/Assets.xcassets */; };
+		E5CF87062FB2562A005C8F14 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E5CF87052FB25629005C8F14 /* WidgetKit.framework */; };
+		E5CF87082FB2562A005C8F14 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E5CF87072FB2562A005C8F14 /* SwiftUI.framework */; };
+		E5CF871D2FB25B49005C8F14 /* JottWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E5CF87032FB25629005C8F14 /* JottWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		RC00000000000000000000001 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = RC00000000000000000000003 /* RevenueCat */; };
 		RC00000000000000000000002 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = RC00000000000000000000004 /* RevenueCat */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		E5CF871E2FB25B49005C8F14 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E50C872B2F6F317400EEF1FD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E5CF87022FB25629005C8F14;
+			remoteInfo = JottWidgetExtension;
+		};
 		F0A1B2C3D4E5F6071829000A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E50C872B2F6F317400EEF1FD /* Project object */;
@@ -46,6 +56,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				E5CF871D2FB25B49005C8F14 /* JottWidgetExtension.appex in Embed App Extensions */,
 			);
 			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -71,8 +82,22 @@
 		AA00C01000000000000000BB /* jott/Model/SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = jott/Model/SpeechManager.swift; sourceTree = SOURCE_ROOT; };
 		AA00E00200000000000000DD /* jott/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = jott/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		E50C87332F6F317400EEF1FD /* jott.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = jott.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5CF87032FB25629005C8F14 /* JottWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JottWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5CF87052FB25629005C8F14 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		E5CF87072FB2562A005C8F14 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		E5CF871C2FB25941005C8F14 /* JottWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = JottWidgetExtension.entitlements; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F60718290001 /* jottTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = jottTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E5CF87162FB2562B005C8F14 /* Exceptions for "JottWidget" folder in "JottWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E5CF87022FB25629005C8F14 /* JottWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		AA00B00900000000000000AA /* jottMobile */ = {
@@ -83,6 +108,14 @@
 		E50C87352F6F317400EEF1FD /* jott */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = jott;
+			sourceTree = "<group>";
+		};
+		E5CF87092FB2562A005C8F14 /* JottWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E5CF87162FB2562B005C8F14 /* Exceptions for "JottWidget" folder in "JottWidgetExtension" target */,
+			);
+			path = JottWidget;
 			sourceTree = "<group>";
 		};
 		F0A1B2C3D4E5F60718290002 /* jottTests */ = {
@@ -111,6 +144,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E5CF87002FB25629005C8F14 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5CF87082FB2562A005C8F14 /* SwiftUI.framework in Frameworks */,
+				E5CF87062FB2562A005C8F14 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F0A1B2C3D4E5F60718290005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,9 +166,12 @@
 		E50C872A2F6F317400EEF1FD = {
 			isa = PBXGroup;
 			children = (
+				E5CF871C2FB25941005C8F14 /* JottWidgetExtension.entitlements */,
 				E50C87352F6F317400EEF1FD /* jott */,
 				F0A1B2C3D4E5F60718290002 /* jottTests */,
 				AA00B00900000000000000AA /* jottMobile */,
+				E5CF87092FB2562A005C8F14 /* JottWidget */,
+				E5CF87042FB25629005C8F14 /* Frameworks */,
 				E50C87342F6F317400EEF1FD /* Products */,
 				E58F2BA82FA61A6B00D81B56 /* Recovered References */,
 			);
@@ -138,6 +183,7 @@
 				E50C87332F6F317400EEF1FD /* jott.app */,
 				F0A1B2C3D4E5F60718290001 /* jottTests.xctest */,
 				AA00B00100000000000000AA /* JottMobile.app */,
+				E5CF87032FB25629005C8F14 /* JottWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -165,6 +211,15 @@
 			name = "Recovered References";
 			sourceTree = "<group>";
 		};
+		E5CF87042FB25629005C8F14 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				E5CF87052FB25629005C8F14 /* WidgetKit.framework */,
+				E5CF87072FB2562A005C8F14 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -180,6 +235,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				E5CF871F2FB25B49005C8F14 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				AA00B00900000000000000AA /* jottMobile */,
@@ -216,6 +272,28 @@
 			productName = jott;
 			productReference = E50C87332F6F317400EEF1FD /* jott.app */;
 			productType = "com.apple.product-type.application";
+		};
+		E5CF87022FB25629005C8F14 /* JottWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E5CF87172FB2562B005C8F14 /* Build configuration list for PBXNativeTarget "JottWidgetExtension" */;
+			buildPhases = (
+				E5CF86FF2FB25629005C8F14 /* Sources */,
+				E5CF87002FB25629005C8F14 /* Frameworks */,
+				E5CF87012FB25629005C8F14 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E5CF87092FB2562A005C8F14 /* JottWidget */,
+			);
+			name = JottWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = JottWidgetExtension;
+			productReference = E5CF87032FB25629005C8F14 /* JottWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		F0A1B2C3D4E5F60718290003 /* jottTests */ = {
 			isa = PBXNativeTarget;
@@ -266,6 +344,9 @@
 							};
 						};
 					};
+					E5CF87022FB25629005C8F14 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					F0A1B2C3D4E5F60718290003 = {
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = E50C87322F6F317400EEF1FD;
@@ -294,6 +375,7 @@
 				E50C87322F6F317400EEF1FD /* jott */,
 				F0A1B2C3D4E5F60718290003 /* jottTests */,
 				AA00B00200000000000000AA /* JottMobile */,
+				E5CF87022FB25629005C8F14 /* JottWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -308,6 +390,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		E50C87312F6F317400EEF1FD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E5CF87012FB25629005C8F14 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -353,6 +442,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E5CF86FF2FB25629005C8F14 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F0A1B2C3D4E5F60718290004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -363,6 +459,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		E5CF871F2FB25B49005C8F14 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E5CF87022FB25629005C8F14 /* JottWidgetExtension */;
+			targetProxy = E5CF871E2FB25B49005C8F14 /* PBXContainerItemProxy */;
+		};
 		F0A1B2C3D4E5F6071829000B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E50C87322F6F317400EEF1FD /* jott */;
@@ -398,7 +499,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott.mobile;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -441,7 +542,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott.mobile;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -690,6 +791,82 @@
 			};
 			name = Release;
 		};
+		E5CF87182FB2562B005C8F14 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = JottWidgetExtension.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 847R6X96S2;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JottWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = JottWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott.JottWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		E5CF87192FB2562B005C8F14 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = JottWidgetExtension.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 847R6X96S2;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JottWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = JottWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott.JottWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		F0A1B2C3D4E5F60718290008 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -749,6 +926,15 @@
 			buildConfigurations = (
 				E50C873F2F6F317500EEF1FD /* Debug */,
 				E50C87402F6F317500EEF1FD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E5CF87172FB2562B005C8F14 /* Build configuration list for PBXNativeTarget "JottWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E5CF87182FB2562B005C8F14 /* Debug */,
+				E5CF87192FB2562B005C8F14 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

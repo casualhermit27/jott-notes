@@ -84,19 +84,36 @@ struct IOSPaywallView: View {
                         Button {
                             Task { await buyLifetime() }
                         } label: {
-                            HStack {
+                            ZStack {
                                 if isPurchasing {
                                     ProgressView().tint(.white)
                                 } else {
-                                    Text("Get Lifetime Access — $12.99")
-                                        .font(.jottTitle(17, weight: .semibold))
-                                        .foregroundColor(.white)
+                                    VStack(spacing: 3) {
+                                        Text("Get Lifetime Access")
+                                            .font(.jottTitle(17, weight: .bold))
+                                        if let price = purchases.offerings?.current?.lifetime?.localizedPriceString {
+                                            Text("One-time \(price) — no subscription, ever")
+                                                .font(.jottCaption(12))
+                                                .opacity(0.82)
+                                        }
+                                    }
                                 }
                             }
+                            .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(ds.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .frame(height: 60)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.52, green: 0.38, blue: 0.98),
+                                        Color(red: 0.30, green: 0.18, blue: 0.82)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: Color(red: 0.38, green: 0.22, blue: 0.85).opacity(0.4), radius: 14, y: 6)
                         }
                         .disabled(isPurchasing || isRestoring)
 
@@ -131,6 +148,9 @@ struct IOSPaywallView: View {
         }
         .onChange(of: purchases.isProActive) { active in
             if active { dismiss() }
+        }
+        .task {
+            await purchases.fetchOfferings()
         }
     }
 

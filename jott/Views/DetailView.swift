@@ -750,14 +750,7 @@ struct DetailView: View {
             JottAmbientBackdrop(isDark: viewModel.isDarkMode)
                 .ignoresSafeArea()
 
-            LinearGradient(
-                colors: [
-                    Color.jottOverlaySurface.opacity(viewModel.isDarkMode ? 0.86 : 0.74),
-                    Color.jottDetailBackground
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color(nsColor: NSColor(calibratedWhite: 0.015, alpha: 1.0))
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {

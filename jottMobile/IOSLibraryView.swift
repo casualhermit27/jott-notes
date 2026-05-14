@@ -29,6 +29,7 @@ struct IOSLibraryView: View {
     @Environment(\.colorScheme) private var scheme
 
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     @State private var activeFilter: IOSLibraryFilter = .none
     @State private var isEditMode = false
     @State private var selectedNoteIDs: Set<UUID> = []
@@ -40,6 +41,7 @@ struct IOSLibraryView: View {
     @State private var showSettings = false
     @State private var isSyncing = false
     @State private var initialSyncDone = false
+    @State private var showSyncTick = false
     @State private var folderToRename: NoteFolder? = nil
     @State private var renameText = ""
     @State private var folderToDelete: NoteFolder? = nil
@@ -122,23 +124,20 @@ struct IOSLibraryView: View {
                             isEditMode: isEditMode,
                             isMultiSelected: selectedNoteIDs.contains(note.id),
                             searchQuery: searchText,
-                            ds: ds
-                        )
-                        .tag(note)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                        .onTapGesture {
-                            if isEditMode {
+                            ds: ds,
+                            onEditTap: isEditMode ? {
+                                Haptics.light()
                                 if selectedNoteIDs.contains(note.id) {
                                     selectedNoteIDs.remove(note.id)
                                 } else {
                                     selectedNoteIDs.insert(note.id)
                                 }
-                            } else {
-                                selectedNote = note
-                            }
-                        }
+                            } : nil
+                        )
+                        .tag(note)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             swipeButtons(for: note)
                         }
@@ -148,7 +147,19 @@ struct IOSLibraryView: View {
                             } label: {
                                 Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
                             }
-                            
+
+                            Button {
+                                if let url = noteStore.exportNoteAsMarkdown(note) {
+                                    let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                       let root = windowScene.windows.first?.rootViewController {
+                                        root.present(activity, animated: true)
+                                    }
+                                }
+                            } label: {
+                                Label("Export as Markdown", systemImage: "square.and.arrow.up")
+                            }
+
                             Menu {
                                 Button("Remove from Folder") {
                                     noteStore.moveNote(note.id, toFolder: nil)
@@ -162,7 +173,7 @@ struct IOSLibraryView: View {
                             } label: {
                                 Label("Move to Folder", systemImage: "folder")
                             }
-                            
+
                             Button(role: .destructive) {
                                 noteStore.deleteNote(note.id)
                                 if selectedNote?.id == note.id { selectedNote = nil }
@@ -181,7 +192,8 @@ struct IOSLibraryView: View {
             .scrollContentBackground(.hidden)
             .background(ds.canvas)
             .refreshable { await triggerSync() }
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
+            .searchable(text: $searchText, isPresented: $isSearchPresented,
+                        placement: .navigationBarDrawer(displayMode: .always),
                         prompt: "Search notes")
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.large)
@@ -200,12 +212,22 @@ struct IOSLibraryView: View {
                     isSyncing = true
                     noteStore.refreshFromDisk()
                     Task {
-                        try? await Task.sleep(for: .seconds(3))
+                        try? await Task.sleep(for: .milliseconds(600))
                         withAnimation(.easeOut(duration: 0.3)) {
                             isSyncing = false
                             initialSyncDone = true
+                            showSyncTick = true
+                        }
+                        try? await Task.sleep(for: .seconds(2))
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            showSyncTick = false
                         }
                     }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .jottFocusSearch)) { _ in
+                withAnimation {
+                    isSearchPresented = true
                 }
             }
             .fullScreenCover(isPresented: $showNewNote) {
@@ -256,17 +278,25 @@ struct IOSLibraryView: View {
     private func triggerSync() async {
         isSyncing = true
         noteStore.refreshFromDisk()
-        try? await Task.sleep(for: .seconds(3))
+        try? await Task.sleep(for: .milliseconds(400))
         withAnimation(.easeOut(duration: 0.3)) {
             isSyncing = false
             initialSyncDone = true
+            showSyncTick = true
+        }
+        try? await Task.sleep(for: .seconds(2))
+        withAnimation(.easeOut(duration: 0.3)) {
+            showSyncTick = false
         }
     }
 
     // MARK: - FAB
 
     private var fabButton: some View {
-        Button { showNewNote = true } label: {
+        Button {
+            Haptics.medium()
+            showNewNote = true
+        } label: {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
@@ -518,6 +548,23 @@ struct IOSLibraryView: View {
             }
         }
         ToolbarItem(placement: .navigationBarTrailing) {
+            if !isSearching {
+                Button {
+                    if let zipURL = noteStore.exportAllNotesAsZip() {
+                        let activity = UIActivityViewController(activityItems: [zipURL], applicationActivities: nil)
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let root = windowScene.windows.first?.rootViewController {
+                            root.present(activity, animated: true)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(ds.inkMute)
+                }
+            }
+        }
+        ToolbarItem(placement: .navigationBarTrailing) {
             if isEditMode && !selectedNoteIDs.isEmpty {
                 Button(role: .destructive) {
                     for id in selectedNoteIDs {
@@ -548,6 +595,11 @@ struct IOSLibraryView: View {
                 ProgressView()
                     .tint(ds.accent)
                     .scaleEffect(0.8)
+            } else if showSyncTick {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.purple)
+                    .transition(.scale.combined(with: .opacity))
             }
         }
         ToolbarItem(placement: .navigationBarLeading) {
@@ -685,12 +737,13 @@ private struct NoteCard: View {
     let isMultiSelected: Bool
     var searchQuery: String = ""
     let ds: JottDS
+    var onEditTap: (() -> Void)? = nil
 
     private var preview: (title: String, body: String) { jottNotePreview(note) }
     private var isSearching: Bool { !searchQuery.isEmpty }
 
     var body: some View {
-        HStack(spacing: 12) {
+        let card = HStack(spacing: 12) {
             if isEditMode {
                 Image(systemName: isMultiSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .medium))
@@ -810,6 +863,16 @@ private struct NoteCard: View {
         }
         // Extra bottom clearance so the depth layers don't visually crowd the next card
         .padding(.bottom, subnoteCount > 0 ? 10 : 0)
+        .contentShape(Rectangle())
+
+        if let onEditTap = onEditTap {
+            Button(action: onEditTap) {
+                card
+            }
+            .buttonStyle(.plain)
+        } else {
+            card
+        }
     }
 }
 

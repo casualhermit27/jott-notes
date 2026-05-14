@@ -266,9 +266,219 @@ struct Block: Identifiable, Codable, Equatable {
         }
     }
 
+    // MARK: - Inline markdown parser
+
+    /// Parses inline markdown syntax into formatted TextSpans.
+    /// Supports: **bold**, *italic*, _italic_, __underline__, ~~strikethrough~~, ==highlight==, `inline code`, [text](url)
+    static func parseInlineMarkdown(_ text: String) -> [TextSpan] {
+        guard !text.isEmpty else { return [TextSpan("")] }
+
+        var spans: [TextSpan] = []
+        var currentText = ""
+        var flags = TextSpan("")
+        var i = text.startIndex
+
+        let markerOrder: [(String, (inout TextSpan) -> Void, (inout TextSpan) -> Bool)] = [
+            ("**", { $0.bold = true }, { $0.bold }),
+            ("__", { $0.underline = true }, { $0.underline }),
+            ("~~", { $0.strikethrough = true }, { $0.strikethrough }),
+            ("==", { $0.highlight = true }, { $0.highlight }),
+            ("*",  { $0.italic = true }, { $0.italic }),
+            ("_",  { $0.italic = true }, { $0.italic }),
+            ("`",  { $0.code = true }, { $0.code }),
+        ]
+
+        func flushSpan() {
+            guard !currentText.isEmpty else { return }
+            var span = TextSpan(currentText)
+            span.bold = flags.bold
+            span.italic = flags.italic
+            span.underline = flags.underline
+            span.strikethrough = flags.strikethrough
+            span.highlight = flags.highlight
+            span.code = flags.code
+            spans.append(span)
+            currentText = ""
+        }
+
+        while i < text.endIndex {
+            let remaining = String(text[i...])
+            var matched = false
+
+            // Link: [text](url)
+            if !flags.code, remaining.hasPrefix("["), let bracketClose = remaining.dropFirst().firstIndex(of: "]"),
+               remaining.index(after: bracketClose) < remaining.endIndex,
+               remaining[remaining.index(after: bracketClose)] == "(",
+               let parenClose = remaining[remaining.index(after: bracketClose)...].firstIndex(of: ")") {
+                flushSpan()
+                let linkTextStart = remaining.index(remaining.startIndex, offsetBy: 1)
+                let linkText = String(remaining[linkTextStart..<bracketClose])
+                let urlStart = remaining.index(after: remaining.index(after: bracketClose))
+                let url = String(remaining[urlStart..<parenClose])
+                var span = TextSpan(linkText)
+                span.linkURL = url
+                spans.append(span)
+                i = text.index(i, offsetBy: remaining.distance(from: remaining.startIndex, to: parenClose) + 1)
+                continue
+            }
+
+            if flags.code {
+                // Inside code: only backtick can close
+                if remaining.hasPrefix("`") {
+                    flushSpan()
+                    flags.code = false
+                    i = text.index(i, offsetBy: 1)
+                    matched = true
+                }
+            } else {
+                for (marker, openFlag, isActive) in markerOrder {
+                    if remaining.hasPrefix(marker) {
+                        flushSpan()
+                        if isActive(&flags) {
+                            // Close
+                            switch marker {
+                            case "**": flags.bold = false
+                            case "__": flags.underline = false
+                            case "~~": flags.strikethrough = false
+                            case "==": flags.highlight = false
+                            case "*", "_": flags.italic = false
+                            case "`": flags.code = false
+                            default: break
+                            }
+                        } else {
+                            openFlag(&flags)
+                        }
+                        i = text.index(i, offsetBy: marker.count)
+                        matched = true
+                        break
+                    }
+                }
+            }
+
+            if !matched {
+                currentText.append(text[i])
+                i = text.index(after: i)
+            }
+        }
+
+        flushSpan()
+        return spans.isEmpty ? [TextSpan("")] : spans
+    }
+
     static func plainTextBlocks(from text: String) -> [Block] {
         let lines = text.components(separatedBy: .newlines)
-        let blocks = lines.map { Block(type: .paragraph, spans: [TextSpan($0)]) }
+        var blocks: [Block] = []
+        var inCodeBlock = false
+        var codeLines: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "```" {
+                if inCodeBlock {
+                    blocks.append(Block(type: .codeBlock, code: codeLines.joined(separator: "\n")))
+                    codeLines = []
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
+                }
+                continue
+            }
+            if inCodeBlock {
+                codeLines.append(line)
+                continue
+            }
+
+            let lineBlocks: [Block]
+            if trimmed.hasPrefix("## ") {
+                lineBlocks = [Block(type: .heading, spans: parseInlineMarkdown(String(trimmed.dropFirst(3))), level: 2)]
+            } else if trimmed.hasPrefix("# ") {
+                lineBlocks = [Block(type: .heading, spans: parseInlineMarkdown(String(trimmed.dropFirst(2))), level: 1)]
+            } else if trimmed.hasPrefix("• ") {
+                lineBlocks = [Block(type: .bulletItem, spans: parseInlineMarkdown(String(trimmed.dropFirst(2))))]
+            } else if trimmed.hasPrefix("☐ ") || trimmed.hasPrefix("☑ ") {
+                lineBlocks = [Block(type: .taskItem, spans: parseInlineMarkdown(String(trimmed.dropFirst(2))), checked: trimmed.hasPrefix("☑ "))]
+            } else if trimmed.hasPrefix("❝ ") {
+                lineBlocks = [Block(type: .quote, spans: parseInlineMarkdown(String(trimmed.dropFirst(2))))]
+            } else if let range = trimmed.range(of: #"^\d+\. "#, options: .regularExpression) {
+                lineBlocks = [Block(type: .numberedItem, spans: parseInlineMarkdown(String(trimmed[range.upperBound...])))]
+            } else {
+                lineBlocks = parseImageMarkdown(in: trimmed)
+            }
+            blocks.append(contentsOf: lineBlocks)
+        }
+
+        if inCodeBlock && !codeLines.isEmpty {
+            blocks.append(Block(type: .codeBlock, code: codeLines.joined(separator: "\n")))
+        }
+
         return blocks.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : blocks
+    }
+
+    /// Parses text for `![](path)` image tokens and returns a mix of paragraph and image blocks.
+    static func parseImageMarkdown(in text: String) -> [Block] {
+        var blocks: [Block] = []
+        var currentText = ""
+        var i = text.startIndex
+
+        while i < text.endIndex {
+            let remaining = String(text[i...])
+            if remaining.hasPrefix("![]("), let close = remaining.firstIndex(of: ")") {
+                let startIdx = remaining.index(remaining.startIndex, offsetBy: 4)
+                let path = String(remaining[startIdx..<close])
+                if !path.isEmpty {
+                    if !currentText.isEmpty {
+                        blocks.append(Block(type: .paragraph, spans: parseInlineMarkdown(currentText)))
+                        currentText = ""
+                    }
+                    blocks.append(Block(type: .image, imageURL: path, imageAlt: ""))
+                    i = text.index(i, offsetBy: remaining.distance(from: remaining.startIndex, to: close) + 1)
+                    continue
+                }
+            }
+            currentText.append(text[i])
+            i = text.index(after: i)
+        }
+
+        if !currentText.isEmpty {
+            blocks.append(Block(type: .paragraph, spans: parseInlineMarkdown(currentText)))
+        }
+        return blocks.isEmpty ? [Block(type: .paragraph, spans: [TextSpan("")])] : blocks
+    }
+
+    /// Parses inline link markdown `[text](url)` into a TextSpan with linkURL.
+    private static func parseLinkMarkdown(in text: String) -> [TextSpan] {
+        var spans: [TextSpan] = []
+        var currentText = ""
+        var i = text.startIndex
+
+        while i < text.endIndex {
+            let remaining = String(text[i...])
+            if remaining.hasPrefix("["), let bracketClose = remaining.dropFirst().firstIndex(of: "]"),
+               remaining.index(after: bracketClose) < remaining.endIndex,
+               remaining[remaining.index(after: bracketClose)] == "(",
+               let parenClose = remaining[remaining.index(after: bracketClose)...].firstIndex(of: ")") {
+                let textStart = remaining.index(remaining.startIndex, offsetBy: 1)
+                let linkText = String(remaining[textStart..<bracketClose])
+                let urlStart = remaining.index(after: bracketClose)
+                let urlStart2 = remaining.index(after: urlStart)
+                let url = String(remaining[urlStart2..<parenClose])
+                if !currentText.isEmpty {
+                    spans.append(contentsOf: parseInlineMarkdown(currentText))
+                    currentText = ""
+                }
+                var span = TextSpan(linkText)
+                span.linkURL = url
+                spans.append(span)
+                i = text.index(i, offsetBy: remaining.distance(from: remaining.startIndex, to: parenClose) + 1)
+                continue
+            }
+            currentText.append(text[i])
+            i = text.index(after: i)
+        }
+
+        if !currentText.isEmpty {
+            spans.append(contentsOf: parseInlineMarkdown(currentText))
+        }
+        return spans.isEmpty ? [TextSpan("")] : spans
     }
 }

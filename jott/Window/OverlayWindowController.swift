@@ -89,6 +89,21 @@ class OverlayWindowController {
             self?.viewModel.dismiss()
             return nil
         }
+
+        // Hide the panel during space transitions (e.g. Spotlight over fullscreen)
+        // so the panel doesn't sit on top of the transition and cause a black screen.
+        NotificationCenter.default.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: NSWorkspace.shared,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.panel.alphaValue > 0 else { return }
+            self.panel.alphaValue = 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.viewModel.isVisible else { return }
+                self.panel.alphaValue = 1
+            }
+        }
     }
 
     func preload() {
@@ -209,14 +224,25 @@ class OverlayWindowController {
         return 154
     }
 
+    private weak var cachedTextView: NSTextView?
+
     private func focusTextView() {
+        if let tv = cachedTextView, tv.window != nil {
+            panel.makeFirstResponder(tv)
+            return
+        }
         guard let hv = hostingView else { return }
-        func findTextView(_ view: NSView) -> JottNSTextView? {
-            if let tv = view as? JottNSTextView { return tv }
+        func findTextView(_ view: NSView) -> NSTextView? {
+            if let tv = view as? NSTextView, tv.isEditable {
+                cachedTextView = tv
+                return tv
+            }
             for sub in view.subviews { if let tv = findTextView(sub) { return tv } }
             return nil
         }
-        if let tv = findTextView(hv) { panel.makeFirstResponder(tv) }
+        if let tv = findTextView(hv) {
+            panel.makeFirstResponder(tv)
+        }
     }
 
     func dismiss() {

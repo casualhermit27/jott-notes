@@ -17,6 +17,7 @@ struct PaywallView: View {
     ]
 
     var body: some View {
+        ZStack(alignment: .topTrailing) {
         VStack(spacing: 0) {
             // Header
             VStack(spacing: 10) {
@@ -74,19 +75,36 @@ struct PaywallView: View {
                 Button {
                     Task { await buyLifetime() }
                 } label: {
-                    HStack {
+                    ZStack {
                         if isPurchasing {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.small).tint(.white)
                         } else {
-                            Text("Get Lifetime Access — $12.99")
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            VStack(spacing: 2) {
+                                Text("Get Lifetime Access")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                if let price = purchases.offerings?.current?.lifetime?.localizedPriceString {
+                                    Text("One-time \(price) — no subscription")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .opacity(0.82)
+                                }
+                            }
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 38)
-                    .background(Color.accentColor)
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.52, green: 0.38, blue: 0.98),
+                                Color(red: 0.30, green: 0.18, blue: 0.82)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .shadow(color: Color(red: 0.38, green: 0.22, blue: 0.85).opacity(0.45), radius: 10, y: 4)
                 }
                 .buttonStyle(.plain)
                 .disabled(isPurchasing || isRestoring)
@@ -113,6 +131,20 @@ struct PaywallView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onChange(of: purchases.isProActive) { active in
             if active { dismiss() }
+        }
+        .task {
+            await purchases.fetchOfferings()
+        }
+
+        Button { dismiss() } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .frame(width: 22, height: 22)
+                .background(Color.secondary.opacity(0.12), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(10)
         }
     }
 

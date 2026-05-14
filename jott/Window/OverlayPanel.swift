@@ -79,7 +79,7 @@ class OverlayPanel: NSPanel {
         super.resignKey()
         guard !Self.suppressResignKey else { return }
         guard !Self.isLocked else { return }
-        let hoverFrame = frame.insetBy(dx: -8, dy: -8)
+        let hoverFrame = frame.insetBy(dx: -2, dy: -2)
         guard !hoverFrame.contains(NSEvent.mouseLocation) else { return }
         NotificationCenter.default.post(name: .overlayDidResignKey, object: nil)
     }
