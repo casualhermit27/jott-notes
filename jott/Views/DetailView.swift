@@ -204,7 +204,7 @@ struct VideoEmbedCard: View {
     @State private var hovered = false
 
     var body: some View {
-        Button(action: { if let u = URL(string: url) { NSWorkspace.shared.open(u) } }) {
+        Button(action: { JottURLSafety.openIfAllowed(url) }) {
             ZStack {
                 // Background / thumbnail
                 if let img = thumbnail {
@@ -268,9 +268,13 @@ struct VideoEmbedCard: View {
               let thumbURL = URL(string: "https://img.youtube.com/vi/\(videoID)/hqdefault.jpg")
         else { return }
         Task {
-            if let data = try? Data(contentsOf: thumbURL),
-               let img = NSImage(data: data) {
-                await MainActor.run { thumbnail = img }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: thumbURL)
+                if let img = NSImage(data: data) {
+                    await MainActor.run { thumbnail = img }
+                }
+            } catch {
+                // Silently fail — thumbnail is decorative
             }
         }
     }
@@ -643,8 +647,8 @@ private struct InlineLinkedTextBlock: View {
         case .text(_, let value):
             let trimmedValue = value.trimmingCharacters(in: .whitespaces)
             if (trimmedValue.hasPrefix("http://") || trimmedValue.hasPrefix("https://")),
-               let url = URL(string: trimmedValue) {
-                Button(action: { NSWorkspace.shared.open(url) }) {
+               JottURLSafety.sanitizedURL(trimmedValue) != nil {
+                Button(action: { JottURLSafety.openIfAllowed(trimmedValue) }) {
                     Text(value)
                         .font(.system(size: 15))
                         .foregroundColor(.accentColor)
@@ -1307,9 +1311,7 @@ private struct LinkChip: View {
 
     var body: some View {
         Button(action: {
-            if let target = URL(string: url) {
-                NSWorkspace.shared.open(target)
-            }
+            JottURLSafety.openIfAllowed(url)
         }) {
             HStack(spacing: 6) {
                 Image(systemName: "link")

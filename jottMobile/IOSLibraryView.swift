@@ -44,6 +44,7 @@ struct IOSLibraryView: View {
     @State private var showSyncTick = false
     @State private var folderToRename: NoteFolder? = nil
     @State private var folderToDelete: NoteFolder? = nil
+    @State private var noteToShare: Note? = nil
 
     private var ds: JottDS { JottDS(isDark: scheme == .dark) }
     private var activeFolderID: UUID? { folderStack.last }
@@ -241,6 +242,12 @@ struct IOSLibraryView: View {
                 .sheet(isPresented: $showNewFolder) {
                     IOSFolderComposerView(folderId: activeFolderID)
                 }
+                .sheet(item: $noteToShare) { note in
+                    if let url = noteStore.exportNoteAsMarkdown(note) {
+                        ShareSheetView(items: [url])
+                            .presentationDetents([.medium, .large])
+                    }
+                }
                 .sheet(item: $folderToRename) { folder in
                     IOSFolderRenameView(folder: folder, onSave: { newName in
                         noteStore.renameFolder(folder.id, to: newName)
@@ -424,7 +431,6 @@ struct IOSLibraryView: View {
             } label: {
                 folderChipLabel(folder.name, icon: "folder.fill",
                                 color: folder.displayColor, isActive: isActive)
-                    .padding(.bottom, 12)
             } primaryAction: {
                 withAnimation(JottMotion.content) {
                     if isActive {
@@ -512,28 +518,43 @@ struct IOSLibraryView: View {
                 noteStore.permanentlyDeleteNote(note.id)
                 if selectedNote?.id == note.id { selectedNote = nil }
             } label: {
-                Label("Delete Forever", systemImage: "trash.fill")
+                swipeLabel("Delete", icon: "trash.fill")
             }
             Button {
                 noteStore.restoreNote(note.id)
             } label: {
-                Label("Restore", systemImage: "arrow.uturn.backward")
+                swipeLabel("Restore", icon: "arrow.uturn.backward")
             }
-            .tint(.green)
+            .tint(Color(red: 0.18, green: 0.72, blue: 0.42))
         } else {
             Button(role: .destructive) {
                 noteStore.deleteNote(note.id)
                 if selectedNote?.id == note.id { selectedNote = nil }
             } label: {
-                Label("Delete", systemImage: "trash")
+                swipeLabel("Delete", icon: "trash.fill")
             }
             Button {
                 noteStore.togglePin(note.id)
             } label: {
-                Label(note.isPinned ? "Unpin" : "Pin",
-                      systemImage: note.isPinned ? "pin.slash" : "pin")
+                swipeLabel(note.isPinned ? "Unpin" : "Pin",
+                           icon: note.isPinned ? "pin.slash.fill" : "pin.fill")
             }
-            .tint(ds.accent)
+            .tint(Color(red: 0.98, green: 0.62, blue: 0.12))
+            Button {
+                noteToShare = note
+            } label: {
+                swipeLabel("Share", icon: "square.and.arrow.up.fill")
+            }
+            .tint(Color(red: 0.34, green: 0.54, blue: 0.98))
+        }
+    }
+
+    private func swipeLabel(_ title: String, icon: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+            Text(title)
+                .font(.jottCaption(11, weight: .semibold))
         }
     }
 
@@ -553,34 +574,43 @@ struct IOSLibraryView: View {
             }
         }
         ToolbarItem(placement: .navigationBarTrailing) {
-            if !isSearching {
-                Button {
-                    if let zipURL = noteStore.exportAllNotesAsZip() {
-                        let activity = UIActivityViewController(activityItems: [zipURL], applicationActivities: nil)
-                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                           let root = windowScene.windows.first?.rootViewController {
-                            root.present(activity, animated: true)
+            if isEditMode {
+                if !selectedNoteIDs.isEmpty {
+                    HStack(spacing: 16) {
+                        Button {
+                            let urls = selectedNoteIDs.compactMap { id in
+                                noteStore.allNotes().first(where: { $0.id == id })
+                            }.compactMap { noteStore.exportNoteAsMarkdown($0) }
+                            if !urls.isEmpty {
+                                let activity = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+                                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                   let root = windowScene.windows.first?.rootViewController {
+                                    root.present(activity, animated: true)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(ds.accent)
+                        }
+                        Button(role: .destructive) {
+                            for id in selectedNoteIDs { noteStore.deleteNote(id) }
+                            selectedNoteIDs.removeAll()
+                            isEditMode = false
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(.red)
                         }
                     }
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(ds.inkMute)
-                }
-            }
-        }
-        ToolbarItem(placement: .navigationBarTrailing) {
-            if isEditMode && !selectedNoteIDs.isEmpty {
-                Button(role: .destructive) {
-                    for id in selectedNoteIDs {
-                        noteStore.deleteNote(id)
+                } else {
+                    Button {
+                        selectedNoteIDs = Set(sortedNotes.map { $0.id })
+                    } label: {
+                        Text("Select All")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(ds.accent)
                     }
-                    selectedNoteIDs.removeAll()
-                    isEditMode = false
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(.red)
                 }
             }
         }
@@ -954,4 +984,14 @@ private struct IOSFolderRenameView: View {
             }
         }
     }
+}
+
+// MARK: - Share sheet
+
+private struct ShareSheetView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

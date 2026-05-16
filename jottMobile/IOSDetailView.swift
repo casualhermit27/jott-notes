@@ -809,24 +809,6 @@ struct IOSBlockTextEditor: UIViewRepresentable {
         func insertTable(rows: Int = 2, columns: Int = 2) { parent.onInsertTable?(rows, columns) }
         func dismissKeyboard() { textView?.resignFirstResponder() }
 
-        func enhance() {
-            guard let tv = textView else { return }
-            let currentText = tv.text ?? ""
-            guard !currentText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-            Task {
-                do {
-                    let enhanced = try await AIEnhancementService.shared.enhance(currentText)
-                    let newBlocks = Block.plainTextBlocks(from: enhanced)
-                    await MainActor.run {
-                        parent.blocks = newBlocks
-                        parent.onBlocksChange?(newBlocks)
-                        tv.attributedText = displayAttributedText(for: newBlocks)
-                    }
-                } catch {
-                    // Silently fail
-                }
-            }
-        }
     }
 }
 
@@ -855,6 +837,9 @@ private final class IOSFormatToolbarView: UIView {
         let scroll = UIScrollView()
         scroll.showsHorizontalScrollIndicator = false
         scroll.showsVerticalScrollIndicator = false
+        scroll.alwaysBounceVertical = false
+        scroll.alwaysBounceHorizontal = true
+        scroll.isDirectionalLockEnabled = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scroll)
 
@@ -905,8 +890,6 @@ private final class IOSFormatToolbarView: UIView {
         addIconBtn(row, sf: "highlighter",       color: inkMute,     sel: #selector(highlight))
         addIconBtn(row, sf: "chevron.left.forwardslash.chevron.right", color: inkMute, sel: #selector(code))
         addIconBtn(row, sf: "tablecells",        color: accentColor, sel: #selector(table))
-        addSeparator(row, isDark: isDark)
-        addEnhanceBtn(row, color: accentColor)
         addSeparator(row, isDark: isDark)
         let micBtn = addIconBtn(row, sf: "mic",  color: inkMute,     sel: #selector(mic))
         coordinator.registerMicButton(micBtn, inkColor: inkMute, activeColor: accentColor)
@@ -963,20 +946,6 @@ private final class IOSFormatToolbarView: UIView {
         return btn
     }
 
-    private func addEnhanceBtn(_ stack: UIStackView, color: UIColor) {
-        let btn = UIButton(type: .system)
-        btn.setTitle("Enhance", for: .normal)
-        btn.setTitleColor(color, for: .normal)
-        btn.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-        btn.addTarget(self, action: #selector(enhance), for: .touchUpInside)
-        btn.backgroundColor = .clear
-        btn.layer.cornerRadius = 7
-        btn.layer.masksToBounds = true
-        btn.widthAnchor.constraint(equalToConstant: 58).isActive = true
-        btn.heightAnchor.constraint(equalToConstant: 38).isActive = true
-        stack.addArrangedSubview(btn)
-    }
-
     // MARK: - Actions
 
     @objc private func bold()      { coordinator?.applyInlineFormat(.bold)          }
@@ -991,7 +960,6 @@ private final class IOSFormatToolbarView: UIView {
     @objc private func quote()     { coordinator?.toggleLinePrefix("❝ ")  }
     @objc private func heading()   { coordinator?.toggleLinePrefix("# ")  }
     @objc private func table()     { coordinator?.insertTable()            }
-    @objc private func enhance()   { coordinator?.enhance()                }
     @objc private func mic()       { coordinator?.toggleVoice()            }
     @objc private func dismiss()   { coordinator?.dismissKeyboard()        }
 }

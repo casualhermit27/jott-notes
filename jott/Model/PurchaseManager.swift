@@ -46,6 +46,8 @@ final class PurchaseManager: ObservableObject {
         NotificationCenter.default.post(name: .jottShowPaywall, object: nil)
     }
 
+    var hasAccess: Bool { isProActive || TrialManager.shared.isActive }
+
     func apply(_ info: CustomerInfo) {
         let entitlement = info.entitlements[entitlementID]
         isProActive = entitlement?.isActive == true

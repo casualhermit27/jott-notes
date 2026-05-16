@@ -260,8 +260,9 @@ final class NoteStore: ObservableObject {
     func attachmentURL(for path: String) -> URL {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if trimmed.hasPrefix("/") {
-            return URL(fileURLWithPath: trimmed)
+        // Reject absolute paths to prevent directory traversal outside the sandbox
+        guard !trimmed.hasPrefix("/") else {
+            return attachmentsDir()
         }
 
         let normalized = trimmed
@@ -272,22 +273,36 @@ final class NoteStore: ObservableObject {
             return attachmentsDir()
         }
 
+        let resolved: URL
         if normalized.hasPrefix("attachments/") {
             let relative = String(normalized.dropFirst("attachments/".count))
-            return relative
+            resolved = relative
                 .split(separator: "/")
                 .map(String.init)
                 .reduce(attachmentsDir()) { partial, component in
                     partial.appending(component: component)
                 }
+        } else {
+            resolved = normalized
+                .split(separator: "/")
+                .map(String.init)
+                .reduce(notesFolder) { partial, component in
+                    partial.appending(component: component)
+                }
         }
 
-        return normalized
-            .split(separator: "/")
-            .map(String.init)
-            .reduce(notesFolder) { partial, component in
-                partial.appending(component: component)
-            }
+        // Final safety check: ensure the resolved path is within our sandbox
+        let resolvedPath = resolved.standardizedFileURL.path
+        let safePaths = [
+            notesFolder.standardizedFileURL.path,
+            attachmentsDir().standardizedFileURL.path
+        ]
+        guard safePaths.contains(where: { resolvedPath.hasPrefix($0) }) else {
+            NSLog("[Jott] Blocked attachment path traversal attempt: \(path)")
+            return attachmentsDir()
+        }
+
+        return resolved
     }
 
     private func writeNoteFile(_ note: Note) {
@@ -577,6 +592,11 @@ final class NoteStore: ObservableObject {
     // MARK: - Notes API
 
     func upsertNote(_ note: Note, syncToCloud: Bool = true) {
+        let isNew = !notesCache.contains(where: { $0.id == note.id })
+        if isNew && !PurchaseManager.shared.hasAccess {
+            PurchaseManager.shared.showPaywall()
+            return
+        }
         writeNoteFile(note)
         if let idx = notesCache.firstIndex(where: { $0.id == note.id }) {
             notesCache[idx] = note

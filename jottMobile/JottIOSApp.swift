@@ -90,7 +90,12 @@ struct JottIOSApp: App {
     @StateObject private var noteStore = NoteStore.shared
 
     init() {
-        PurchaseManager.shared.configure(apiKey: "appl_XYLhrMbEstcWOKXePgCkTxXslcB")
+        let apiKey = JottConfig.revenueCatAPIKey
+        if apiKey.isEmpty {
+            NSLog("[Jott] Warning: RevenueCat API key is missing. Add REVENUECAT_API_KEY to build settings or Info.plist.")
+        } else {
+            PurchaseManager.shared.configure(apiKey: apiKey)
+        }
     }
 
     var body: some Scene {

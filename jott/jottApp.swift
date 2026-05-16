@@ -20,7 +20,19 @@ struct jottApp: App {
     @StateObject private var menuBarStore = MenuBarStore()
 
     init() {
-        PurchaseManager.shared.configure(apiKey: "appl_XYLhrMbEstcWOKXePgCkTxXslcB")
+        let apiKey = JottConfig.revenueCatAPIKey
+        if apiKey.isEmpty {
+            NSLog("[Jott] Warning: RevenueCat API key is missing. Add REVENUECAT_API_KEY to build settings or Info.plist.")
+        } else {
+            PurchaseManager.shared.configure(apiKey: apiKey)
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                await PurchaseManager.shared.refresh()
+                if !PurchaseManager.shared.hasAccess {
+                    PurchaseManager.shared.showPaywall()
+                }
+            }
+        }
     }
 
     var body: some Scene {

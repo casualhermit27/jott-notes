@@ -601,16 +601,14 @@ final class OverlayViewModel: ObservableObject {
             // (so the list stays useful while the suggestion bar offers the switch)
             if isTypingNewCommand {
                 switch mode {
-                case .reminders: return .reminders(query: "")
-                case .inbox:     return .inbox
-                case .today:     return .today
-                default:         return mode
+                case .inbox: return .inbox
+                case .today: return .today
+                default:     return mode
                 }
             }
             switch mode {
-            case .reminders: return .reminders(query: inputText)
-            case .search:    return .search(query: inputText)
-            default:         return mode
+            case .search: return .search(query: inputText)
+            default:      return mode
             }
         }
         if isForcedCreationMode { return nil }
@@ -624,10 +622,6 @@ final class OverlayViewModel: ObservableObject {
 
     func commandItems(for command: JottCommand) -> [TimelineItem] {
         switch command {
-        case .reminders(let q):
-            let all = getAllReminders()
-            if q.isEmpty { return all.map { .reminder($0) } }
-            return all.filter { $0.text.lowercased().contains(q.lowercased()) }.map { .reminder($0) }
         case .search(let q):
             let notes = searchNotes(q).map { TimelineItem.note($0) }
             let reminders: [TimelineItem]
@@ -639,10 +633,6 @@ final class OverlayViewModel: ObservableObject {
                     .map { TimelineItem.reminder($0) }
             }
             return (notes + reminders).sorted { $0.date > $1.date }
-        case .open:
-            return []
-        case .calendar:
-            return []
         case .inbox:
             let notes = getAllNotes().map { TimelineItem.note($0) }
             let reminders = getAllReminders().map { TimelineItem.reminder($0) }
@@ -1029,7 +1019,6 @@ final class OverlayViewModel: ObservableObject {
         let isDateMode: Bool
         if let mode = commandMode {
             switch mode {
-            case .calendar, .reminders: isDateMode = true
             default: return nil
             }
         } else if let forced = forcedType {
@@ -1064,25 +1053,6 @@ final class OverlayViewModel: ObservableObject {
         let timeStr = timeFmt.string(from: date)
 
         switch mode {
-        case .calendar:
-            let ok = calendarManager.createEvent(title: result.title, startDate: date, recurrence: rec)
-            if ok {
-                inputText = ""; commandMode = nil
-                showFeedback("Event → Apple Calendar · \(timeStr)", icon: "calendar")
-            }
-            return ok
-        case .reminders:
-            let r = Reminder(text: result.title, dueDate: date, tags: [])
-            store.saveReminder(r)
-            NotificationManager.shared.scheduleReminder(r)
-            inputText = ""; commandMode = nil
-            if calendarManager.createReminder(title: result.title, dueDate: date, recurrence: rec) {
-                showStoreFeedback(success: "Reminder → Apple Reminders · \(timeStr)", icon: "bell.fill")
-            } else {
-                showStoreFeedback(success: "Reminder set · \(timeStr)", icon: "bell.fill")
-            }
-            objectWillChange.send()
-            return true
         default:
             return false
         }
@@ -1130,13 +1100,6 @@ final class OverlayViewModel: ObservableObject {
         objectWillChange.send()
     }
 
-    // MARK: - Smart Recall
-    var smartRecallResults: [TimelineItem] {
-        []
-    }
-
-    var isSmartRecalling: Bool { !smartRecallResults.isEmpty }
-
     // MARK: - Tag Autocomplete
     /// Returns the partial tag being typed (text after the last `#` in the last word), or nil if not applicable.
     var tagQuery: String? {
@@ -1174,7 +1137,7 @@ final class OverlayViewModel: ObservableObject {
     @Published var inlineEditText: String = ""
 
     func startInlineEdit() {
-        let items = currentCommandItems().isEmpty ? smartRecallResults : currentCommandItems()
+        let items = currentCommandItems()
         guard !items.isEmpty else { return }
         let idx = max(0, min(selectedCommandIndex, items.count - 1))
         switch items[idx] {

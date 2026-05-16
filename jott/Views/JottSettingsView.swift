@@ -6,6 +6,7 @@ struct JottSettingsView: View {
     @ObservedObject private var updates = UpdateManager.shared
     @StateObject private var purchases = PurchaseManager.shared
     @AppStorage("jott_autoPasteClipboard") private var autoPasteClipboard: Bool = false
+    @AppStorage("jott_showHelpButton") private var showHelpButton: Bool = true
     @State private var showPaywall = false
 
     var body: some View {
@@ -30,16 +31,24 @@ struct JottSettingsView: View {
                     if !purchases.isProActive {
                         Button { showPaywall = true } label: {
                             HStack(spacing: 12) {
-                                Image("JottControlIcon")
+                                Image("JottAppIcon")
                                     .resizable()
                                     .frame(width: 28, height: 28)
                                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text("Upgrade to Jott Pro")
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    Text("One-time \(purchases.offerings?.current?.lifetime?.localizedPriceString ?? "$12.99") — lifetime access")
-                                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                                        .opacity(0.82)
+                                    if TrialManager.shared.isActive {
+                                        Text("\(TrialManager.shared.daysRemaining) days left in your free trial")
+                                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        Text("Upgrade to keep access forever")
+                                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                                            .opacity(0.82)
+                                    } else {
+                                        Text("Upgrade to Jott Pro")
+                                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        Text("One-time \(purchases.offerings?.current?.lifetime?.localizedPriceString ?? "$12.99") — lifetime access")
+                                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                                            .opacity(0.82)
+                                    }
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.right")
@@ -79,6 +88,24 @@ struct JottSettingsView: View {
                             Text("Auto-paste on open")
                                 .font(.system(size: 12.5, weight: .medium))
                             Text("When enabled, copied content is automatically pasted into Jott when you open the bar.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+
+                    sectionDivider
+
+                    // MARK: - Jott Bar
+                    sectionHeader("JOTT BAR", icon: "capsule")
+
+                    Toggle(isOn: $showHelpButton) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show ? shortcut button")
+                                .font(.system(size: 12.5, weight: .medium))
+                            Text("Displays the ? help button in the Jott bar toolbar.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }

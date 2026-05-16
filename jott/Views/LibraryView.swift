@@ -494,6 +494,16 @@ struct LibraryView: View {
 
         Divider()
 
+        Button {
+            if let url = NoteStore.shared.exportNoteAsMarkdown(note) {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            Label("Export as Markdown", systemImage: "square.and.arrow.up")
+        }
+
+        Divider()
+
         Button(role: .destructive) {
             selectedNoteIDs = [note.id]
             showDeleteConfirm = true
@@ -3050,8 +3060,6 @@ private struct LibraryEditFormatBar: View {
             icon("textformat.size", command: .heading)
             icon("link", command: .link)
             tableMenu
-            sep
-            enhanceBtn
         }
     }
 
@@ -3077,29 +3085,6 @@ private struct LibraryEditFormatBar: View {
                 showTableGrid = false
             }
         }
-    }
-
-    private var enhanceBtn: some View {
-        Button {
-            Task {
-                let text = blocks.map(\.plainText).joined(separator: "\n")
-                guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                do {
-                    let enhanced = try await AIEnhancementService.shared.enhance(text)
-                    let newBlocks = Block.plainTextBlocks(from: enhanced)
-                    if blocks != newBlocks { blocks = newBlocks }
-                } catch {
-                    // Silently fail
-                }
-            }
-        } label: {
-            Text("Enhance")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.secondary.opacity(0.75))
-                .frame(height: 22)
-                .padding(.horizontal, 4)
-        }
-        .buttonStyle(.plain)
     }
 
     private func apply(_ command: JottTextFormatCommand) {

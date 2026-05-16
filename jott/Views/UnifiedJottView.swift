@@ -376,6 +376,7 @@ struct JottCaptureView: View {
     @State private var dropdownReady = false
     @AppStorage("jott_hasSeenWelcome") private var hasSeenWelcome: Bool = false
     @AppStorage("jott_autoPasteClipboard") private var autoPasteClipboard: Bool = false
+    @AppStorage("jott_showHelpButton") private var showHelpButton: Bool = true
 
     @ObservedObject private var speech = SpeechManager.shared
     @State private var voicePrefix = ""
@@ -424,10 +425,7 @@ struct JottCaptureView: View {
 
     private func commandKind(_ cmd: JottCommand) -> String {
         switch cmd {
-        case .reminders: return "reminders"
         case .search: return "search"
-        case .open: return "open"
-        case .calendar: return "calendar"
         case .inbox: return "recent"
         case .today: return "today"
         }
@@ -491,17 +489,19 @@ struct JottCaptureView: View {
     @ViewBuilder private var toolbarRow: some View {
         let isSaved = !viewModel.autoSaveStatus.isEmpty
         HStack(spacing: 6) {
-            Button { showHelp.toggle() } label: {
-                Text("?")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.28))
-                    .frame(width: 22, height: 22)
-                    .background(Color.white.opacity(0.06))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                JottHelpPopover()
+            if showHelpButton {
+                Button { showHelp.toggle() } label: {
+                    Text("?")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.28))
+                        .frame(width: 22, height: 22)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showHelp, arrowEdge: .bottom) {
+                    JottHelpPopover()
+                }
             }
 
             Spacer()
@@ -718,15 +718,9 @@ struct JottCaptureView: View {
                     .colorScheme(.dark)
             }
             .background(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 0,
-                    bottomLeadingRadius: viewModel.morphRadius,
-                    bottomTrailingRadius: viewModel.morphRadius,
-                    topTrailingRadius: 0,
-                    style: .continuous
-                )
-                .fill(jottNotchVoidBlack)
-                .frame(width: viewModel.morphWidth)
+                JottBarShape(bottomRadius: viewModel.morphRadius)
+                    .fill(jottNotchVoidBlack)
+                    .frame(width: viewModel.morphWidth)
             )
 
             // ── Dropdown — floats below input panel ────────────────────────
@@ -765,10 +759,7 @@ struct JottCaptureView: View {
 // MARK: - Command detection
 
 enum JottCommand: Equatable {
-    case reminders(query: String)
     case search(query: String)
-    case open
-    case calendar
     case inbox
     case today
 
@@ -858,15 +849,6 @@ struct JottInputArea: View {
 
     private func badgeInfoForCommand(_ cmd: JottCommand) -> TypeBadgeInfo {
         switch cmd {
-        case .calendar:
-            return TypeBadgeInfo(label: "Calendar", icon: "calendar",
-                                 tint: .jottReminderAccent)
-        case .reminders:
-            return TypeBadgeInfo(label: "Reminders", icon: "bell",
-                                 tint: .jottReminderAccent)
-        case .open:
-            return TypeBadgeInfo(label: "Open", icon: "folder",
-                                 tint: .secondary)
         case .search:
             return TypeBadgeInfo(label: "Search", icon: "magnifyingglass",
                                  tint: .jottOverlaySelectorAccent)
@@ -889,15 +871,6 @@ struct JottInputArea: View {
         let trimmed = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty, viewModel.commandCreationPreview() != nil {
             viewModel.createCurrentItem(); return
-        }
-        let smartItems = viewModel.smartRecallResults
-        if !smartItems.isEmpty {
-            let idx = max(0, min(viewModel.selectedCommandIndex, smartItems.count - 1))
-            switch smartItems[idx] {
-            case .note(let n):     viewModel.selectedNote = n
-            case .reminder(let r): viewModel.selectedReminder = r
-            }
-            return
         }
         let cmdItems = viewModel.currentCommandItems()
         if !cmdItems.isEmpty {
@@ -1108,9 +1081,7 @@ struct JottInputArea: View {
         }
         if let mode = viewModel.commandMode {
             switch mode {
-            case .calendar:  return "event title, tomorrow at 3pm..."
-            case .reminders: return "remind me to... by when?"
-            default:         return ""
+            default: return ""
             }
         }
         // idle state: SwiftUI overlay shows rotating hint, suppress native placeholder
@@ -1272,6 +1243,30 @@ private struct JottDraftTableEditor: View {
         for index in table.rows.indices {
             table.rows[index].append("")
         }
+    }
+}
+
+// MARK: - Jott Bar Shape (convex top corners, convex bottom corners, different radii)
+
+private struct JottBarShape: Shape {
+    var bottomRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let W = rect.width, H = rect.height
+        let b = bottomRadius
+
+        p.move(to: CGPoint(x: 0, y: 0))
+        p.addLine(to: CGPoint(x: W, y: 0))
+        p.addLine(to: CGPoint(x: W, y: H - b))
+        p.addArc(center: CGPoint(x: W - b, y: H - b), radius: b,
+                 startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+        p.addLine(to: CGPoint(x: b, y: H))
+        p.addArc(center: CGPoint(x: b, y: H - b), radius: b,
+                 startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        p.addLine(to: CGPoint(x: 0, y: 0))
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -1891,38 +1886,25 @@ struct JottCommandResults: View {
 
     private var label: String {
         switch command {
-        case .reminders: return "Reminders"
         case .search:    return "Search"
-        case .open:      return "Action"
-        case .calendar:  return "Calendar"
         case .inbox:     return "Recent"
         case .today:     return "Today"
         }
     }
     private var sectionIcon: String {
         switch command {
-        case .reminders: return "bell"
         case .search:    return "magnifyingglass"
-        case .open:      return "arrow.up.right.square"
-        case .calendar:  return "calendar"
         case .inbox:     return "clock"
         case .today:     return "sun.max"
         }
     }
     private var sectionAccent: Color {
-        switch command {
-        case .reminders: return .jottReminderAccent
-        default:         return .secondary
-        }
+        return .secondary
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if case .open = command {
-                JottOpenAction(viewModel: viewModel)
-            } else if case .calendar = command {
-                CalendarResultsView(viewModel: viewModel)
-            } else if case .today = command {
+            if case .today = command {
                 JottTodayView(viewModel: viewModel)
             } else {
                 if case .search = command {
@@ -2168,10 +2150,6 @@ struct ItemCreationPreviewCard: View {
         if let p = viewModel.commandCreationPreview() {
             let (iconName, accentColor): (String, Color) = {
                 switch viewModel.commandMode {
-                case .calendar:
-                    return ("calendar.badge.plus", Color("jott-reminder-accent"))
-                case .reminders:
-                    return ("bell.fill", Color("jott-reminder-accent"))
                 default:
                     return ("plus.circle", .secondary)
                 }
@@ -2279,201 +2257,6 @@ struct ItemCreationPreviewCard: View {
                 }
             .padding(.horizontal, 20)
             .padding(.top, 20)
-        }
-    }
-}
-
-// MARK: - Calendar Results View
-
-struct CalendarResultsView: View {
-    @ObservedObject var viewModel: OverlayViewModel
-    @ObservedObject private var calMgr = CalendarManager.shared
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("CALENDAR")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.45))
-                    .tracking(0.6)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 8)
-
-            if !calMgr.isAuthorized {
-                VStack(spacing: 10) {
-                    Text("Calendar access not granted")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary.opacity(0.5))
-                    if calMgr.isRequestingCalendarAccess {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    }
-                    Button(action: {
-                        Task { await calMgr.requestAccess() }
-                    }) {
-                        Text("Connect Calendar")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Color("jott-green"))
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
-                    }
-                    .buttonStyle(.plain)
-                    if let msg = calMgr.authorizationErrorMessage {
-                        Text(msg)
-                            .font(.system(size: 11))
-                            .foregroundColor(.orange)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        Button("Open Privacy Settings") {
-                            calMgr.openCalendarPrivacySettings()
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(Color("jott-green"))
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                let events = calMgr.upcomingEvents()
-                if events.isEmpty {
-                    Text("No upcoming events")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary.opacity(0.4))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView(showsIndicators: false) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(events, id: \.eventIdentifier) { event in
-                                CalendarRow(event: event, viewModel: viewModel)
-                            }
-                        }
-                        .padding(.bottom, 6)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Calendar Row
-
-struct CalendarRow: View {
-    let event: EKEvent
-    @ObservedObject var viewModel: OverlayViewModel
-    @State private var hovered = false
-    @State private var imported = false
-
-    var body: some View {
-        HStack(spacing: 10) {
-            // Calendar color dot
-            Circle()
-                .fill(Color(cgColor: event.calendar.cgColor))
-                .frame(width: 8, height: 8)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(event.title ?? "Untitled")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color("jott-input-text"))
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(formatTime(event))
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.5))
-                    if let count = event.attendees?.count, count > 1 {
-                        Text("\(count) attendees")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary.opacity(0.4))
-                    }
-                }
-            }
-            Spacer()
-            if hovered {
-                Button(action: {
-                    viewModel.importCalendarEvent(event)
-                    withAnimation(JottMotion.micro) { imported = true }
-                }) {
-                    Image(systemName: imported ? "checkmark.circle.fill" : "arrow.down.circle")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(imported ? Color("jott-accent-green") : .secondary.opacity(0.5))
-                        .scaleEffect(imported ? 1.08 : 1.0)
-                        .animation(JottMotion.micro, value: imported)
-                }
-                .buttonStyle(.plain)
-                .transition(.scale(scale: 0.96).combined(with: .opacity).animation(JottMotion.content))
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(
-            Group {
-                if hovered {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.jottOverlayHoverFill)
-                        .padding(.horizontal, 6)
-                }
-            }
-        )
-        .contentShape(Rectangle())
-        .onHover { h in withAnimation(JottMotion.micro) { hovered = h } }
-    }
-
-    private func formatTime(_ event: EKEvent) -> String {
-        if event.isAllDay { return "All day" }
-        let cal = Calendar.current
-        let f = DateFormatter()
-        if cal.isDateInToday(event.startDate) {
-            f.dateFormat = "h:mm a"
-            return "Today \(f.string(from: event.startDate))"
-        } else if cal.isDateInTomorrow(event.startDate) {
-            f.dateFormat = "h:mm a"
-            return "Tomorrow \(f.string(from: event.startDate))"
-        } else {
-            f.dateFormat = "EEE h:mm a"
-            return f.string(from: event.startDate)
-        }
-    }
-}
-
-// MARK: - Smart Recall View
-
-struct SmartRecallView: View {
-    @ObservedObject var viewModel: OverlayViewModel
-
-    private var noteResults: [Note] {
-        viewModel.smartRecallResults.compactMap {
-            if case .note(let n) = $0 { return n } else { return nil }
-        }
-    }
-    private var otherResults: [(Int, TimelineItem)] {
-        viewModel.smartRecallResults.enumerated().compactMap {
-            if case .note = $0.element { return nil }
-            return ($0.offset, $0.element)
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ResultsSectionHeader(title: "SUGGESTIONS", icon: "sparkles",
-                                 accent: .secondary, count: viewModel.smartRecallResults.count)
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    if !noteResults.isEmpty {
-                        NoteGrid(notes: noteResults, viewModel: viewModel,
-                                 highlightQuery: viewModel.inputText.isEmpty ? nil : viewModel.inputText)
-                            .colorScheme(.dark)
-                    }
-                    ForEach(otherResults, id: \.0) { index, item in
-                        JottRow(item: item, viewModel: viewModel,
-                                isSelected: index == viewModel.selectedCommandIndex)
-                    }
-                }
-            }
-            .frame(maxHeight: 300)
         }
     }
 }
@@ -2607,44 +2390,6 @@ struct JottTodayView: View {
             }
             .padding(.bottom, 6)
         }
-    }
-}
-
-// MARK: - /open action view
-
-struct JottOpenAction: View {
-    @ObservedObject var viewModel: OverlayViewModel
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: { viewModel.openNotesFolder(); viewModel.dismiss() }) {
-            HStack(spacing: 10) {
-                Image(systemName: "folder")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color("jott-green"))
-                    .frame(width: 18)
-                Text("Open Notes Folder in Finder")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.4))
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(
-                Group {
-                    if hovered {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.jottOverlayHoverFill)
-                        .padding(.horizontal, 6)
-                }
-            }
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { h in withAnimation(JottMotion.micro) { hovered = h } }
     }
 }
 
@@ -3095,15 +2840,6 @@ struct JottNativeInput: NSViewRepresentable {
                 vm.createCurrentItem()
                 return
             }
-            let smartItems = vm.smartRecallResults
-            if !smartItems.isEmpty {
-                let idx = max(0, min(vm.selectedCommandIndex, smartItems.count - 1))
-                switch smartItems[idx] {
-                case .note(let n):     vm.selectedNote = n
-                case .reminder(let r): vm.selectedReminder = r
-                }
-                return
-            }
             let cmdItems = vm.currentCommandItems()
             if !cmdItems.isEmpty {
                 vm.startInlineEdit()
@@ -3323,35 +3059,6 @@ struct JottNativeInput: NSViewRepresentable {
                 tv.insertText("\n", replacementRange: tv.selectedRange())
                 return true
             }
-            // Smart Recall navigation
-            if parent.viewModel.isSmartRecalling {
-                let items = parent.viewModel.smartRecallResults
-                if !items.isEmpty {
-                    if sel == #selector(NSResponder.moveDown(_:)) ||
-                       sel == #selector(NSResponder.moveRight(_:)) {
-                        let next = min(parent.viewModel.selectedCommandIndex + 1, items.count - 1)
-                        parent.viewModel.selectedCommandIndex = next
-                        return true
-                    }
-                    if sel == #selector(NSResponder.moveUp(_:)) ||
-                       sel == #selector(NSResponder.moveLeft(_:)) {
-                        let prev = max(parent.viewModel.selectedCommandIndex - 1, 0)
-                        parent.viewModel.selectedCommandIndex = prev
-                        return true
-                    }
-                    if sel == #selector(NSResponder.insertTab(_:)) {
-                        let idx = max(0, min(parent.viewModel.selectedCommandIndex, items.count - 1))
-                        let vm = parent.viewModel
-                        DispatchQueue.main.async {
-                            switch items[idx] {
-                            case .note(let n):     vm.selectedNote = n
-                            case .reminder(let r): vm.selectedReminder = r
-                            }
-                        }
-                        return true
-                    }
-                }
-            }
             // Tab-complete a /command suggestion before result-opening handles Tab.
             // This keeps "/not<Tab>" as "Notes mode" instead of opening the first note result.
             if sel == #selector(NSResponder.insertTab(_:)),
@@ -3400,9 +3107,7 @@ struct JottNativeInput: NSViewRepresentable {
             }
             // Cmd+D → mark selected reminder as done
             if sel == #selector(NSResponder.deleteToEndOfLine(_:)) {
-                let items = !parent.viewModel.currentCommandItems().isEmpty
-                    ? parent.viewModel.currentCommandItems()
-                    : parent.viewModel.smartRecallResults
+                let items = parent.viewModel.currentCommandItems()
                 guard !items.isEmpty else { return false }
                 let idx = max(0, min(parent.viewModel.selectedCommandIndex, items.count - 1))
                 if case .reminder(let r) = items[idx] {
@@ -3785,8 +3490,6 @@ struct JottFormatBar: View {
                 MFIcon("textformat.size", accessibilityLabel: "Heading") { apply(.heading) }
                 tableMenu
             }
-            fmtSep
-            enhanceBtn
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -3828,31 +3531,6 @@ struct JottFormatBar: View {
             }
         }
         .accessibilityLabel("Insert table")
-    }
-
-    private var enhanceBtn: some View {
-        Button {
-            Task {
-                let text = viewModel.inputText
-                guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                do {
-                    let enhanced = try await AIEnhancementService.shared.enhance(text)
-                    viewModel.inputText = enhanced
-                } catch {
-                    // Silently fail — enhancement is best-effort
-                }
-            }
-        } label: {
-            Text("Enhance")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.primary.opacity(0.60))
-                .frame(height: 26)
-                .padding(.horizontal, 6)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.92, pressedOpacity: 0.9))
-        .accessibilityLabel("Enhance with AI")
-        .accessibilityHint("Rewrites and improves the current text.")
     }
 
     private func MFBtn(_ lbl: String, style: FmtStyle, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
@@ -3997,33 +3675,47 @@ struct JottWelcomeCard: View {
     }
 }
 
+// MARK: - Onboarding Overlay
+
 // MARK: - Help Popover
 
 struct JottHelpPopover: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 10) {
 
-            helpSection("OPEN / CLOSE") {
-                helpRow("⌥⌥", "Toggle overlay")
-                helpRow("⎋", "Dismiss & save")
+                helpSection("OPEN / CLOSE") {
+                    helpRow("⌥⌥", "Toggle overlay")
+                    helpRow("⎋", "Dismiss & save")
+                }
+                helpSection("CAPTURE") {
+                    helpRow("↵", "New line")
+                    helpRow("⌘↵", "Save / open")
+                    helpRow("⇥", "Autocomplete suggestion")
+                    helpRow("⌘⇧M", "Voice input")
+                    helpRow("⌘⇧F", "Format bar")
+                }
+                helpSection("FORMATTING") {
+                    helpRow("**text**", "Bold")
+                    helpRow("*text*", "Italic")
+                    helpRow("`text`", "Inline code")
+                    helpRow("# ", "Heading (H1–H3)")
+                    helpRow("- ", "Bullet list")
+                    helpRow("[ ] ", "Task / checkbox")
+                }
+                helpSection("COMMANDS") {
+                    helpRow("/today  /t", "Today's items")
+                    helpRow("/search  /s", "Search everything")
+                    helpRow("/recent  /r", "Recent notes")
+                }
+                helpSection("DETAIL VIEW") {
+                    helpRow("⌘O", "Open in editor")
+                    helpRow("⌘⌫", "Delete note")
+                }
             }
-            helpSection("CAPTURE") {
-                helpRow("↵", "New line")
-                helpRow("⌘↵", "Save / open")
-                helpRow("⌘⇧M", "Voice input")
-                helpRow("⌘⇧F", "Format bar (Aa)")
-            }
-            helpSection("COMMANDS") {
-                helpRow("/today  or  /t", "Today's items")
-                helpRow("/search  or  /s", "Search everything")
-                helpRow("/recent  or  /r", "Recent notes")
-            }
-            helpSection("DETAIL VIEW") {
-                helpRow("⌘O", "Open in editor")
-                helpRow("⌘⌫", "Delete note")
-            }
+            .padding(14)
         }
-        .padding(14)
+        .frame(maxHeight: 320)
     }
 
     @ViewBuilder

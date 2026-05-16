@@ -46,6 +46,11 @@ struct IOSRootView: View {
         }
         .sheet(isPresented: $showSettings) { IOSSettingsView() }
         .task { await NotificationManager.shared.requestPermission() }
+        .task {
+            try? await Task.sleep(for: .seconds(1))
+            await purchases.refresh()
+            if !purchases.hasAccess { showPaywall = true }
+        }
         .onAppear { presentRequestedNewNoteIfNeeded() }
         .onReceive(quickCapture.$requestToken.dropFirst()) { _ in showRequestedNewNote = true }
         .onChange(of: scenePhase) { _, phase in

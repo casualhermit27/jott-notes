@@ -6,9 +6,6 @@ struct IOSSettingsView: View {
     @StateObject private var purchases = PurchaseManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("jott_aiUserContext") private var aiUserContext: String = ""
-    @State private var editingAIContext = false
-    @State private var aiContextDraft = ""
     @State private var isSyncing = false
     @State private var syncMessage: String? = nil
     @State private var syncSucceeded = false
@@ -33,20 +30,28 @@ struct IOSSettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 12) {
 
-                        // Upgrade
+                        // Upgrade / Trial
                         if !purchases.isProActive {
                             Button { showPaywall = true } label: {
                                 HStack(spacing: 14) {
-                                    Image("JottControlIcon")
+                                    Image("JottAppIcon")
                                         .resizable()
                                         .frame(width: 36, height: 36)
                                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text("Upgrade to Jott Pro")
-                                            .font(.jottBody(16, weight: .bold))
-                                        Text("One-time \(purchases.offerings?.current?.lifetime?.localizedPriceString ?? "$12.99") — lifetime access")
-                                            .font(.jottCaption(12))
-                                            .opacity(0.82)
+                                        if TrialManager.shared.isActive {
+                                            Text("\(TrialManager.shared.daysRemaining) days left in your free trial")
+                                                .font(.jottBody(16, weight: .bold))
+                                            Text("Upgrade to keep access forever")
+                                                .font(.jottCaption(12))
+                                                .opacity(0.82)
+                                        } else {
+                                            Text("Upgrade to Jott Pro")
+                                                .font(.jottBody(16, weight: .bold))
+                                            Text("One-time \(purchases.offerings?.current?.lifetime?.localizedPriceString ?? "$12.99") — lifetime access")
+                                                .font(.jottCaption(12))
+                                                .opacity(0.82)
+                                        }
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right")
@@ -163,54 +168,6 @@ struct IOSSettingsView: View {
                                 .buttonStyle(.plain)
                                 .disabled(isSyncing)
                             }
-                        }
-
-                        // AI Context
-                        settingsSection(title: "AI CONTEXT") {
-                            if editingAIContext {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    TextEditor(text: $aiContextDraft)
-                                        .font(.jottBody(14))
-                                        .foregroundStyle(ds.ink)
-                                        .scrollContentBackground(.hidden)
-                                        .background(ds.canvas)
-                                        .frame(minHeight: 80)
-                                    HStack {
-                                        Button("Cancel") {
-                                            aiContextDraft = aiUserContext
-                                            editingAIContext = false
-                                        }
-                                        .font(.jottBody(14))
-                                        .foregroundStyle(ds.inkMute)
-                                        Spacer()
-                                        Button("Save") {
-                                            aiUserContext = aiContextDraft
-                                            NoteAIService.saveUserContext(aiContextDraft)
-                                            editingAIContext = false
-                                        }
-                                        .font(.jottBody(14, weight: .semibold))
-                                        .foregroundStyle(ds.accent)
-                                    }
-                                }
-                            } else {
-                                HStack(alignment: .top) {
-                                    Text(aiUserContext.isEmpty ? "Not set" : aiUserContext)
-                                        .font(.jottBody(14))
-                                        .foregroundStyle(aiUserContext.isEmpty ? ds.inkFaint : ds.ink)
-                                        .lineLimit(3)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    Button("Edit") {
-                                        aiContextDraft = aiUserContext
-                                        editingAIContext = true
-                                    }
-                                    .font(.jottBody(14))
-                                    .foregroundStyle(ds.accent)
-                                }
-                            }
-                            Text("Included in every AI prompt so suggestions feel personal.")
-                                .font(.jottCaption(12))
-                                .foregroundStyle(ds.inkFaintest)
-                                .padding(.top, 2)
                         }
 
                         // About
