@@ -51,6 +51,8 @@ private struct JottDS {
 struct LibraryView: View {
     @ObservedObject var viewModel: OverlayViewModel
     @ObservedObject private var noteStore = NoteStore.shared
+    @ObservedObject private var syncManager = CloudKitSyncManager.shared
+    @ObservedObject private var purchases = PurchaseManager.shared
     @Namespace private var gridCardNamespace
     @State private var searchText: String = ""
     @State private var selectedItem: LibrarySelection?
@@ -160,6 +162,30 @@ struct LibraryView: View {
 
                 Divider().opacity(isDarkMode ? 0.16 : 0.10)
 
+                // CloudKit sync error banner
+                if let errorMessage = syncManager.syncError {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.icloud")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(errorMessage)
+                            .font(.system(size: 11))
+                            .lineLimit(2)
+                        Spacer()
+                        Button {
+                            syncManager.dismissSyncError()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color(red: 0.75, green: 0.28, blue: 0.22))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 // Folder strip — always visible unless searching or viewing trash
                 if !isSearching && !isRecentlyDeleted {
                     FolderStrip(
@@ -213,6 +239,7 @@ struct LibraryView: View {
                                 )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("New note")
                         .padding(.trailing, 14)
                         .padding(.bottom, 14)
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
@@ -272,7 +299,7 @@ struct LibraryView: View {
                 guard !Task.isCancelled else { return }
                 let q = searchText
                 let results = await Task.detached(priority: .userInitiated) {
-                    SearchEngine.shared.search(query: q, store: NoteStore.shared)
+                    await SearchEngine.shared.search(query: q, store: NoteStore.shared)
                 }.value
                 guard !Task.isCancelled else { return }
                 searchResults = results
@@ -369,14 +396,17 @@ struct LibraryView: View {
             ScrollView(showsIndicators: false) {
                 if notes.isEmpty {
                     LibraryEmptyState(
+                        icon: isRecentlyDeleted
+                            ? "trash"
+                            : (activeFolderID != nil ? "folder" : "note.text"),
                         title: isRecentlyDeleted
-                            ? "Recently Deleted is empty"
+                            ? "Nothing here"
                             : (activeFolderID != nil ? "Nothing in this folder" : "No notes yet"),
                         message: isRecentlyDeleted
-                            ? "Deleted notes stay here until you delete them forever."
+                            ? "Deleted notes appear here for 30 days."
                             : (activeFolderID != nil
                             ? "Right-click any note and choose Move to Folder."
-                            : "Capture something and it will land here.")
+                            : "Double-tap Option to open Jott and start capturing.")
                     )
                     .frame(height: max(proxy.size.height - 32, 200))
                 } else {
@@ -795,6 +825,7 @@ private struct LibraryMinimalNoteCard: View {
                 .overlay(Capsule(style: .continuous).strokeBorder(ds.accent.opacity(showSubnotes ? 0.45 : (isDarkMode ? 0.25 : 0.12)), lineWidth: 0.8))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(showSubnotes ? "Hide subnotes" : "\(subnoteCount) subnote\(subnoteCount == 1 ? "" : "s"), tap to show")
             .padding(.trailing, 10)
             .padding(.bottom, 10)
         }
@@ -997,7 +1028,6 @@ private struct LibraryNoteDetailPanel: View {
 
     var body: some View {
         let ds = JottDS(isDark: isDark)
-        let hasSubnotes = !viewModel.subnotes(of: note.id).isEmpty
 
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
@@ -1015,7 +1045,7 @@ private struct LibraryNoteDetailPanel: View {
                                 let parentTitle = parentNote?.text
                                     .components(separatedBy: "\n")
                                     .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? "Back"
-                                Text(parentTitle ?? "Back")
+                                Text(parentTitle)
                                     .font(.system(size: 11, weight: .medium))
                                     .lineLimit(1)
                             }
@@ -1026,6 +1056,7 @@ private struct LibraryNoteDetailPanel: View {
                             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Back to parent note")
                     } else {
                         // Mono meta: date · relative time
                         Text("\(formattedDate)  ·  \(relativeTimeLabel)")
@@ -1055,6 +1086,7 @@ private struct LibraryNoteDetailPanel: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(viewModel.isEditingNote ? "Done editing" : "Edit note")
 
                     // Open in editor
                     Button {
@@ -1068,6 +1100,7 @@ private struct LibraryNoteDetailPanel: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Open in editor")
                     .help("Open .md file in default editor")
 
                     // Expand
@@ -1082,6 +1115,7 @@ private struct LibraryNoteDetailPanel: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "Collapse panel" : "Expand panel")
 
                     // Close
                     Button(action: onClose) {
@@ -1093,6 +1127,7 @@ private struct LibraryNoteDetailPanel: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close note")
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 14)
@@ -1150,6 +1185,7 @@ private struct LibraryNoteDetailPanel: View {
                     .strokeBorder(squishColor.opacity(0.22), lineWidth: 0.8))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("New subnote")
             .frame(maxWidth: .infinity)
             .padding(.bottom, 18)
             .opacity(subnoteButtonVisible ? 1 : 0)
@@ -1205,6 +1241,7 @@ private struct LibraryNoteDetailPanel: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Cancel subnote")
             .padding(.top, 3)
         }
         .padding(.horizontal, 12)
@@ -1324,8 +1361,6 @@ private struct LibraryInPlaceDetailCard: View {
     }
 
     var body: some View {
-        let hasSubnotes = !viewModel.subnotes(of: note.id).isEmpty
-
         ZStack(alignment: .bottomTrailing) {
             VStack(alignment: .leading, spacing: 0) {
                 // Header
@@ -1345,6 +1380,7 @@ private struct LibraryInPlaceDetailCard: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Expand note")
                     }
                     Button(action: onClose) {
                         Image(systemName: "xmark")
@@ -1355,6 +1391,7 @@ private struct LibraryInPlaceDetailCard: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close note")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -1437,6 +1474,7 @@ private struct LibraryInPlaceDetailCard: View {
                     .strokeBorder(squishColor.opacity(0.22), lineWidth: 0.8))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("New subnote")
             .frame(maxWidth: .infinity)
             .padding(.bottom, 16)
             .opacity(showingSubnoteInput ? 0 : 1)
@@ -2171,6 +2209,7 @@ private struct FolderStrip: View {
     var onAddFolder: (() -> Void)? = nil
     var onRenameFolder: ((NoteFolder) -> Void)? = nil
 
+    @ObservedObject private var purchases = PurchaseManager.shared
     @State private var isCreating = false
     @State private var newName = ""
     @State private var newColor: FolderColorTag = .lavender
@@ -2206,6 +2245,78 @@ private struct FolderStrip: View {
         }
     }
 
+    @ViewBuilder private var creationRow: some View {
+        HStack(spacing: 8) {
+            Button { showColorPicker.toggle() } label: {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(newColor.color)
+                    .animation(.easeInOut(duration: 0.15), value: newColor)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Choose folder color")
+            .popover(isPresented: $showColorPicker, arrowEdge: .bottom) {
+                HStack(spacing: 6) {
+                    ForEach(FolderColorTag.allCases, id: \.self) { tag in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.12)) { newColor = tag }
+                            showColorPicker = false
+                        } label: {
+                            ZStack {
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(tag.color)
+                                if newColor == tag {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .frame(width: 32, height: 32)
+                            .background(newColor == tag ? tag.color.opacity(0.15) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(tag.rawValue) folder")
+                    }
+                }
+                .padding(10)
+            }
+
+            TextField("Folder name", text: $newName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(ds.ink)
+                .focused($fieldFocused)
+                .frame(minWidth: 90, maxWidth: 150)
+                .onSubmit { commitNew() }
+
+            Button(action: commitNew) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(newName.trimmingCharacters(in: .whitespaces).isEmpty ? ds.inkFaintest : ds.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Create folder")
+            .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            Button(action: cancelNew) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(ds.inkFaint)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel new folder")
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(ds.surfaceAlt)
+        .clipShape(Capsule(style: .continuous))
+        .overlay(Capsule(style: .continuous).strokeBorder(ds.accentRing, lineWidth: 1))
+        .transition(.scale(scale: 0.88, anchor: .leading).combined(with: .opacity))
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -2228,6 +2339,7 @@ private struct FolderStrip: View {
                         .clipShape(Capsule(style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Back to \(breadcrumb.dropLast().last?.name ?? "all folders")")
 
                     if breadcrumb.count > 1 {
                         ForEach(Array(breadcrumb.dropLast().enumerated()), id: \.element.id) { i, f in
@@ -2269,79 +2381,14 @@ private struct FolderStrip: View {
 
                 // Inline creation field (replaces + button while active)
                 if isCreating {
-                    HStack(spacing: 8) {
-                        // Folder icon — tap opens color popover
-                        Button {
-                            showColorPicker.toggle()
-                        } label: {
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(newColor.color)
-                                .animation(.easeInOut(duration: 0.15), value: newColor)
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showColorPicker, arrowEdge: .bottom) {
-                            HStack(spacing: 6) {
-                                ForEach(FolderColorTag.allCases, id: \.self) { tag in
-                                    Button {
-                                        withAnimation(.easeInOut(duration: 0.12)) { newColor = tag }
-                                        showColorPicker = false
-                                    } label: {
-                                        ZStack {
-                                            Image(systemName: "folder.fill")
-                                                .font(.system(size: 18))
-                                                .foregroundColor(tag.color)
-                                            if newColor == tag {
-                                                Image(systemName: "checkmark")
-                                                    .font(.system(size: 7, weight: .bold))
-                                                    .foregroundColor(.white)
-                                            }
-                                        }
-                                        .frame(width: 32, height: 32)
-                                        .background(newColor == tag ? tag.color.opacity(0.15) : Color.clear)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(10)
-                        }
-
-                        TextField("Folder name", text: $newName)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(ds.ink)
-                            .focused($fieldFocused)
-                            .frame(minWidth: 90, maxWidth: 150)
-                            .onSubmit { commitNew() }
-
-                        // Confirm
-                        Button(action: commitNew) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(newName.trimmingCharacters(in: .whitespaces).isEmpty ? ds.inkFaintest : ds.accent)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                        // Cancel
-                        Button(action: cancelNew) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(ds.inkFaint)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.escape, modifiers: [])
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(ds.surfaceAlt)
-                    .clipShape(Capsule(style: .continuous))
-                    .overlay(Capsule(style: .continuous).strokeBorder(ds.accentRing, lineWidth: 1))
-                    .transition(.scale(scale: 0.88, anchor: .leading).combined(with: .opacity))
+                    creationRow
                 } else {
                     // + button
                     Button {
+                        guard purchases.hasAccess else {
+                            PurchaseManager.shared.showPaywall()
+                            return
+                        }
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
                             isCreating = true
                         }
@@ -2355,6 +2402,7 @@ private struct FolderStrip: View {
                             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("New folder")
                     .help("New folder")
                     .transition(.scale(scale: 0.88, anchor: .leading).combined(with: .opacity))
                 }
@@ -2469,6 +2517,7 @@ private struct LibraryTopBar: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("\(destructiveActionLabel) \(selectedCount) selected note\(selectedCount == 1 ? "" : "s")")
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .leading)))
             }
@@ -2490,6 +2539,7 @@ private struct LibraryTopBar: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(activeFilter == .recentlyDeleted ? "Show all notes" : "Recently Deleted")
                 .help("Recently Deleted")
 
                 Button {
@@ -2509,6 +2559,7 @@ private struct LibraryTopBar: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Export all notes")
                 .help("Export All Notes")
             }
 
@@ -2535,6 +2586,7 @@ private struct LibraryTopBar: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(activeFilter.isActive ? "Filter: \(activeFilter.label), tap to change" : "Filter notes")
                 .popover(isPresented: $showFilterPopover, arrowEdge: .bottom) {
                     LibraryFilterPopover(
                         activeFilter: $activeFilter,
@@ -2564,6 +2616,7 @@ private struct LibraryTopBar: View {
                             .foregroundColor(ds.inkFaint)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 10)
@@ -2732,27 +2785,33 @@ private struct FolderEmptyState: View {
 }
 
 private struct LibraryEmptyState: View {
+    let icon: String
     let title: String
     let message: String
     @State private var appeared = false
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Color.clear
-            VStack(alignment: .trailing, spacing: 3) {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: icon)
+                .font(.system(size: 32, weight: .light))
+                .foregroundColor(.primary.opacity(0.25))
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared ? 0 : 6)
+            VStack(spacing: 4) {
                 Text(title)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(.primary.opacity(0.22))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.primary.opacity(0.60))
                 Text(message)
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.18))
-                    .multilineTextAlignment(.trailing)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            .padding(.bottom, 24)
-            .padding(.trailing, 2)
             .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 5)
+            .offset(y: appeared ? 0 : 4)
+            Spacer()
         }
+        .padding(.vertical, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             withAnimation(.easeOut(duration: 0.35).delay(0.08)) { appeared = true }
@@ -2762,25 +2821,25 @@ private struct LibraryEmptyState: View {
 }
 
 private struct SearchResultsEmptyState: View {
-    let title: String
+    var title: String = ""
     let query: String
 
     var body: some View {
-        VStack(spacing: 18) {
-            Text(title)
-                .font(JottTypography.title(40, weight: .semibold))
-                .foregroundColor(.primary.opacity(0.92))
-
-            Text("Nothing matched \"\(query)\"")
-                .font(JottTypography.noteBody(20, weight: .medium))
-                .foregroundColor(.secondary.opacity(0.72))
-                .multilineTextAlignment(.center)
-
-            Text("Try a broader term or a more exact phrase.")
-                .font(JottTypography.ui(16, weight: .medium))
-                .foregroundColor(.secondary.opacity(0.56))
-                .multilineTextAlignment(.center)
+        VStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 34, weight: .light))
+                .foregroundColor(.primary.opacity(0.25))
+            VStack(spacing: 4) {
+                Text("No results for \"\(query)\"")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.primary.opacity(0.60))
+                Text("Try different keywords.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
         }
+        .multilineTextAlignment(.center)
+        .padding(.vertical, 40)
         .frame(maxWidth: .infinity)
         .frame(minHeight: 520, maxHeight: .infinity, alignment: .center)
         .padding(.horizontal, 32)
@@ -3415,6 +3474,8 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
     var onBackspaceOnEmpty: (() -> Void)? = nil
     var onUndo: (() -> Void)? = nil
     var onHeightChange: ((CGFloat) -> Void)? = nil
+    /// Optional pre-handler called before built-in doCommandBy logic. Return true to consume the event.
+    var onDoCommand: ((Selector, NSTextView) -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -4157,6 +4218,7 @@ struct LibraryNoteTextEditor: NSViewRepresentable {
         }
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
+            if let handler = parent.onDoCommand, handler(sel, tv) { return true }
             if sel == #selector(NSResponder.insertNewline(_:))  { return handleEnter(in: tv) }
             // Backspace on empty field — clear command/forced mode (fallback when performKeyEquivalent misses it)
             if sel == #selector(NSResponder.deleteBackward(_:)),

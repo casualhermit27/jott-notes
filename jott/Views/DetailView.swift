@@ -167,6 +167,7 @@ struct AttachmentImageView: View {
                                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(copied ? "Copied" : "Copy image")
                             .padding(8)
                             .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)).animation(JottMotion.content))
                         }
@@ -257,6 +258,7 @@ struct VideoEmbedCard: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(isYouTube ? "Play YouTube video" : "Play Vimeo video")
         .onHover { isHovering in
             withAnimation(JottMotion.micro) { hovered = isHovering }
         }
@@ -539,6 +541,8 @@ private struct InlineAttachmentImageToken: View {
             .padding(.horizontal, 3)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(alt.isEmpty ? "Image attachment" : alt)
+        .accessibilityHint(isExpanded ? "Collapse image" : "Expand image")
         .onAppear(perform: loadImage)
     }
 }
@@ -823,6 +827,7 @@ struct DetailView: View {
                             .strokeBorder(accent.opacity(0.22), lineWidth: 0.8))
                     }
                     .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.94, pressedOpacity: 0.80))
+                    .accessibilityLabel("New subnote")
                     .padding(.bottom, 16)
                     .transition(.opacity.animation(JottMotion.content))
                 }
@@ -903,6 +908,7 @@ private struct NoteEditToolbarStrip: View {
                     ))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(showFormat ? "Hide formatting toolbar" : "Show formatting toolbar")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
@@ -918,24 +924,37 @@ private struct NoteEditFormatBar: View {
         HStack(spacing: 2) {
             fmtGroup {
                 fmtBtn("B", isBold: true) { apply(.bold) }
+                    .accessibilityLabel("Bold")
                 fmtBtn("I", isItalic: true) { apply(.italic) }
+                    .accessibilityLabel("Italic")
                 fmtBtn("U", isUnderline: true) { apply(.underline) }
+                    .accessibilityLabel("Underline")
                 fmtBtn("S", isStrike: true) { apply(.strikethrough) }
+                    .accessibilityLabel("Strikethrough")
                 fmtIcon("highlighter") { apply(.highlight) }
+                    .accessibilityLabel("Highlight")
             }
             fmtSep
             fmtGroup {
                 fmtIcon("list.bullet") { apply(.bulletList) }
+                    .accessibilityLabel("Bullet list")
                 fmtIcon("list.number") { apply(.numberedList) }
+                    .accessibilityLabel("Numbered list")
                 fmtIcon("checklist") { apply(.taskList) }
+                    .accessibilityLabel("Task list")
                 fmtIcon("text.quote") { apply(.quote) }
+                    .accessibilityLabel("Block quote")
             }
             fmtSep
             fmtGroup {
                 fmtIcon("chevron.left.forwardslash.chevron.right") { apply(.inlineCode) }
+                    .accessibilityLabel("Inline code")
                 fmtIcon("textformat.size") { apply(.heading) }
+                    .accessibilityLabel("Heading")
                 fmtIcon("link") { apply(.link) }
+                    .accessibilityLabel("Insert link")
                 tableMenu
+                    .accessibilityLabel("Insert table")
             }
         }
         .padding(.horizontal, 8)
@@ -1055,6 +1074,7 @@ private struct DetailHeader: View {
                 .background(Color(red: 0.447, green: 0.420, blue: 1.0), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(JottJellyButtonStyle())
+            .accessibilityLabel(isInSubnoteNav ? "Back to \(backLabel)" : "Close note")
 
             Spacer()
 
@@ -1071,15 +1091,17 @@ private struct DetailHeader: View {
                     iconBtn("pin\(note.isPinned ? ".fill" : "")", color: note.isPinned ? .orange : .secondary) {
                         viewModel.togglePin(note)
                     }
+                    .accessibilityLabel(note.isPinned ? "Unpin note" : "Pin note")
                     iconBtn("doc.on.doc", color: .secondary) {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(note.text, forType: .string)
                     }
+                    .accessibilityLabel("Copy note text")
                     iconBtn("arrow.up.right.square", color: .secondary) {
                         viewModel.openNoteInEditor(note)
                     }
                     .keyboardShortcut("o", modifiers: .command)
-
+                    .accessibilityLabel("Open in editor")
 
                     Button(action: { showInfo.toggle() }) {
                         Image(systemName: "info.circle")
@@ -1088,6 +1110,7 @@ private struct DetailHeader: View {
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(JottSquishyButtonStyle(pressedScale: 0.88, pressedOpacity: 0.85))
+                    .accessibilityLabel("Note info")
                     .popover(isPresented: $showInfo, arrowEdge: .top) {
                         NoteInfoPopover(note: note, viewModel: viewModel)
                     }
@@ -1099,6 +1122,7 @@ private struct DetailHeader: View {
                         }
                     }
                     .keyboardShortcut(.delete, modifiers: .command)
+                    .accessibilityLabel("Delete note")
                 }
             } else if let _ = viewModel.selectedReminder {
                 typeBadge("REMINDER", color: Color("jott-reminder-accent"))
@@ -1169,6 +1193,7 @@ private struct NoteInfoPopover: View {
                                     .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Filter by tag \(tag)")
                         }
                     }
                 }
@@ -1723,6 +1748,7 @@ private struct AISuggestionChip: View {
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundColor(accent)
                 .buttonStyle(.plain)
+                .accessibilityLabel("Apply suggestion")
 
             Button {
                 onDismiss()
@@ -1734,6 +1760,7 @@ private struct AISuggestionChip: View {
                     .background(Circle().fill(isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss suggestion")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

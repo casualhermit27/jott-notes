@@ -21,7 +21,7 @@ enum JottConfig {
         // 3. Deprecated hardcoded fallback — DO NOT commit real keys here.
         // This path exists only so the app compiles out-of-the-box for development.
         // Replace with your own test key or leave empty.
-        return ""
+        return "appl_XYLhrMbEstcWOKXePgCkTxXslcB"
     }
 
     static var hasRevenueCatKey: Bool { !revenueCatAPIKey.isEmpty }

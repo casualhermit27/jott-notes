@@ -47,7 +47,10 @@ class OverlayWindowController {
 
         NotificationCenter.default.addObserver(
             forName: .overlayDidResignKey, object: nil, queue: .main
-        ) { [weak self] _ in self?.viewModel.dismiss() }
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor [self] in self.viewModel.dismiss() }
+        }
 
         viewModel.$isVisible
             .receive(on: DispatchQueue.main)
@@ -56,7 +59,7 @@ class OverlayWindowController {
 
         viewModel.$isDarkMode
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.applyAppearance() }
+            .sink { [weak self] _ in self?.applyAppearance(rebuildRootView: true) }
             .store(in: &cancellables)
 
         viewModel.$isLocked
@@ -113,12 +116,14 @@ class OverlayWindowController {
         hostingView?.layoutSubtreeIfNeeded()
     }
 
-    private func applyAppearance() {
+    private func applyAppearance(rebuildRootView: Bool = false) {
         let appearance = NSAppearance(named: .darkAqua)
         panel.appearance = appearance
         panel.contentView?.appearance = appearance
         hostingView?.appearance = appearance
-        hostingView?.rootView = OverlayView(viewModel: viewModel)
+        if rebuildRootView {
+            hostingView?.rootView = OverlayView(viewModel: viewModel)
+        }
         hostingView?.needsLayout = true
     }
 
@@ -147,9 +152,6 @@ class OverlayWindowController {
         dismissWorkItem = nil
         applyAppearance()
         NSApp.activate(ignoringOtherApps: true)
-
-        // Clear stale text-view cache so we always find the live editor.
-        cachedTextView = nil
 
         hostingView?.layer?.removeAllAnimations()
         hostingView?.layer?.transform = CATransform3DIdentity

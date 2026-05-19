@@ -2,6 +2,56 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import Combine
+import AVFoundation
+
+// MARK: - Locked banner (trial ended)
+
+struct IOSLockedBanner: View {
+    var body: some View {
+        Button {
+            NotificationCenter.default.post(name: .jottShowPaywall, object: nil)
+        } label: {
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(red: 0.710, green: 0.549, blue: 0.965))
+                    Text("Your trial has ended")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                Text("Your notes are safe and waiting.\nUnlock Jott to keep writing.")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                Text("Unlock Jott  ·  $12.99 one time")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .tracking(0.3)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color(red: 0.545, green: 0.361, blue: 0.965),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .padding(.horizontal, 16)
+            .background(
+                Color(red: 0.545, green: 0.361, blue: 0.965).opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color(red: 0.710, green: 0.549, blue: 0.965).opacity(0.20), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
 
 // MARK: - Detail view (read + edit)
 
@@ -10,6 +60,7 @@ struct IOSDetailView: View {
     let onDelete: (() -> Void)?
 
     @ObservedObject private var noteStore: NoteStore
+    @ObservedObject private var purchases = PurchaseManager.shared
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dismiss) private var dismiss
     @State private var isEditing = false
@@ -93,8 +144,6 @@ struct IOSDetailView: View {
 
     private var readView: some View {
         let subnotes = noteStore.allNotes().filter { $0.parentId == note.id }
-        let preview = jottNotePreview(liveNote)
-
         return ZStack(alignment: .bottom) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -123,22 +172,28 @@ struct IOSDetailView: View {
             .onTapGesture(count: 2) { enterEditing() }
             .coordinateSpace(name: "detailScroll")
 
-            Button { showNewSubnote = true } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus.circle")
-                        .font(.system(size: 17, weight: .medium))
-                    Text("New Subnote")
-                        .font(.jottBody(15, weight: .medium))
+            if purchases.hasAccess {
+                Button { showNewSubnote = true } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 17, weight: .medium))
+                        Text("New Subnote")
+                            .font(.jottBody(15, weight: .medium))
+                    }
+                    .foregroundStyle(ds.accent)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 13)
+                    .background(ds.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(ds.accent.opacity(0.22), lineWidth: 0.8))
                 }
-                .foregroundStyle(ds.accent)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 13)
-                .background(ds.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(ds.accent.opacity(0.22), lineWidth: 0.8))
+                .buttonStyle(.plain)
+                .padding(.bottom, 28)
+            } else {
+                IOSLockedBanner()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
             }
-            .buttonStyle(.plain)
-            .padding(.bottom, 28)
         }
     }
 
@@ -296,6 +351,10 @@ struct IOSDetailView: View {
     // MARK: - Helpers
 
     private func enterEditing() {
+        guard purchases.hasAccess else {
+            NotificationCenter.default.post(name: .jottShowPaywall, object: nil)
+            return
+        }
         editBlocks = liveNote.blocks
         isEditing = true
     }
@@ -660,6 +719,32 @@ struct IOSBlockTextEditor: UIViewRepresentable {
                     self.voiceTextLength = 0
                 } else {
                     guard let tv = self.textView else { return }
+                    switch AVAudioApplication.shared.recordPermission {
+                    case .denied:
+                        return
+                    case .undetermined:
+                        AVAudioApplication.requestRecordPermission { granted in
+                            guard granted else { return }
+                            DispatchQueue.main.async {
+                                self.voiceStartLocation = tv.selectedRange.location
+                                self.voiceTextLength = 0
+                                self.micButton?.tintColor = self.micActiveColor
+                                let cfg = UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+                                self.micButton?.setImage(UIImage(systemName: "stop.circle.fill", withConfiguration: cfg), for: .normal)
+                                sm.startRecording { [weak self] partial in
+                                    self?.insertVoiceText(partial, isFinal: false)
+                                } onFinal: { [weak self] final in
+                                    self?.insertVoiceText(final, isFinal: true)
+                                    let cfg = UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+                                    self?.micButton?.setImage(UIImage(systemName: "mic", withConfiguration: cfg), for: .normal)
+                                    self?.micButton?.tintColor = self?.micInkColor
+                                }
+                            }
+                        }
+                        return
+                    default:
+                        break
+                    }
                     self.voiceStartLocation = tv.selectedRange.location
                     self.voiceTextLength = 0
                     self.micButton?.tintColor = self.micActiveColor

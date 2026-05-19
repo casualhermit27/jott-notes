@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 import AppIntents
 
 // MARK: - Haptics
@@ -38,7 +39,7 @@ class JottAppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
-    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [String: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         Task { @MainActor in
             NoteStore.shared.refreshFromDisk()
             completionHandler(.newData)
@@ -102,6 +103,30 @@ struct JottIOSApp: App {
         WindowGroup {
             IOSRootView()
                 .environmentObject(noteStore)
+                .onReceive(noteStore.objectWillChange) { _ in
+                    Task { @MainActor in
+                        Self.pushWidgetData(from: noteStore)
+                    }
+                }
+                .onAppear {
+                    Self.pushWidgetData(from: noteStore)
+                }
+        }
+    }
+
+    @MainActor
+    private static func pushWidgetData(from store: NoteStore) {
+        let pinned = store.allNotes().first { $0.isPinned && $0.deletedAt == nil }
+        if let note = pinned {
+            let lines = note.plainText
+                .components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let body = lines.dropFirst().prefix(3).joined(separator: " · ")
+            JottWidgetBridge.update(pinnedTitle: note.title,
+                                    pinnedBody: body.isEmpty ? nil : body,
+                                    modifiedAt: note.modifiedAt)
+        } else {
+            JottWidgetBridge.update(pinnedTitle: nil, pinnedBody: nil, modifiedAt: nil)
         }
     }
 }

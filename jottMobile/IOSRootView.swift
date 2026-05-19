@@ -4,6 +4,7 @@ import Combine
 struct IOSRootView: View {
     @EnvironmentObject private var noteStore: NoteStore
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("jott_hasSeenOnboarding") private var hasSeenOnboarding: Bool = false
     @State private var selectedNote: Note?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @StateObject private var quickCapture = JottQuickCaptureCenter.shared
@@ -45,11 +46,18 @@ struct IOSRootView: View {
             }
         }
         .sheet(isPresented: $showSettings) { IOSSettingsView() }
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasSeenOnboarding },
+            set: { if !$0 { hasSeenOnboarding = true } }
+        )) {
+            JottOnboardingV2 { hasSeenOnboarding = true }
+            // swap to JottOnboardingV1 { hasSeenOnboarding = true } for the single-screen variant
+        }
         .task { await NotificationManager.shared.requestPermission() }
         .task {
             try? await Task.sleep(for: .seconds(1))
             await purchases.refresh()
-            if !purchases.hasAccess { showPaywall = true }
+            // Don't block launch — locked state surfaces inline when user tries to act.
         }
         .onAppear { presentRequestedNewNoteIfNeeded() }
         .onReceive(quickCapture.$requestToken.dropFirst()) { _ in showRequestedNewNote = true }
@@ -87,3 +95,5 @@ private struct IOSEmptyDetail: View {
         .background(ds.canvas.ignoresSafeArea())
     }
 }
+
+// Onboarding lives in IOSOnboarding.swift (JottOnboardingV1 / JottOnboardingV2)

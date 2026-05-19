@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		A1B2C3D4E5F60718293A0001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A0003 /* Sentry */; };
-		A1B2C3D4E5F60718293A0002 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A0004 /* Sparkle */; };
 		AA00D00100000000000000CC /* jott/Model/Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00100000000000000BB /* jott/Model/Note.swift */; };
 		AA00D00200000000000000CC /* jott/Model/NoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00200000000000000BB /* jott/Model/NoteStore.swift */; };
 		AA00D00300000000000000CC /* jott/Model/NoteFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00C00300000000000000BB /* jott/Model/NoteFolder.swift */; };
@@ -139,7 +138,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F60718293A0001 /* Sentry in Frameworks */,
-				A1B2C3D4E5F60718293A0002 /* Sparkle in Frameworks */,
 				RC00000000000000000000001 /* RevenueCat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -266,7 +264,6 @@
 			name = jott;
 			packageProductDependencies = (
 				A1B2C3D4E5F60718293A0003 /* Sentry */,
-				A1B2C3D4E5F60718293A0004 /* Sparkle */,
 				RC00000000000000000000003 /* RevenueCat */,
 			);
 			productName = jott;
@@ -364,7 +361,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A1B2C3D4E5F60718293A0005 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
-				A1B2C3D4E5F60718293A0006 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				RC00000000000000000000005 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -487,6 +483,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_RevenueCatAPIKey = appl_XYLhrMbEstcWOKXePgCkTxXslcB;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
@@ -503,7 +500,10 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -511,7 +511,7 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -530,6 +530,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Jott uses the microphone to transcribe voice notes.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_RevenueCatAPIKey = appl_XYLhrMbEstcWOKXePgCkTxXslcB;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
@@ -546,14 +547,17 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -685,7 +689,7 @@
 				CODE_SIGN_ENTITLEMENTS = jott/jott.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 847R6X96S2;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -715,13 +719,14 @@
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Jott creates reminders and reads reminder lists to keep your tasks in sync.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Jott creates reminders to capture your tasks.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_RevenueCatAPIKey = appl_XYLhrMbEstcWOKXePgCkTxXslcB;
 				INFOPLIST_KEY_SUFeedURL = "https://example.com/jott/appcast.xml";
 				INFOPLIST_KEY_SentryDSN = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -742,7 +747,7 @@
 				CODE_SIGN_ENTITLEMENTS = jott/jott.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 847R6X96S2;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -772,13 +777,14 @@
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Jott creates reminders and reads reminder lists to keep your tasks in sync.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Jott creates reminders to capture your tasks.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Jott uses speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_RevenueCatAPIKey = appl_XYLhrMbEstcWOKXePgCkTxXslcB;
 				INFOPLIST_KEY_SUFeedURL = "https://example.com/jott/appcast.xml";
 				INFOPLIST_KEY_SentryDSN = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.casualhermit.jott;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -959,14 +965,6 @@
 				minimumVersion = 8.57.0;
 			};
 		};
-		A1B2C3D4E5F60718293A0006 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.6.4;
-			};
-		};
 		RC00000000000000000000005 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios";
@@ -982,11 +980,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1B2C3D4E5F60718293A0005 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
 			productName = Sentry;
-		};
-		A1B2C3D4E5F60718293A0004 /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A1B2C3D4E5F60718293A0006 /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
 		};
 		RC00000000000000000000003 /* RevenueCat */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -593,7 +593,7 @@ final class NoteStore: ObservableObject {
 
     func upsertNote(_ note: Note, syncToCloud: Bool = true) {
         let isNew = !notesCache.contains(where: { $0.id == note.id })
-        if isNew && !PurchaseManager.shared.hasAccess {
+        if isNew && syncToCloud && !PurchaseManager.shared.hasAccess {
             PurchaseManager.shared.showPaywall()
             return
         }

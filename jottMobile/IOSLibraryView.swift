@@ -29,6 +29,7 @@ struct IOSLibraryView: View {
     @Binding var activeFilter: IOSLibraryFilter
     @Binding var showSettings: Bool
     @ObservedObject private var noteStore = NoteStore.shared
+    @ObservedObject private var purchases = PurchaseManager.shared
     @Environment(\.colorScheme) private var scheme
 
     @State private var searchText = ""
@@ -225,6 +226,10 @@ struct IOSLibraryView: View {
                     }
                 }
             }
+            .onDisappear {
+                searchText = ""
+                searchResults = []
+            }
             .onReceive(NotificationCenter.default.publisher(for: .jottFocusSearch)) { _ in
                 withAnimation {
                     isSearchPresented = true
@@ -302,7 +307,11 @@ struct IOSLibraryView: View {
     private var fabButton: some View {
         Button {
             Haptics.medium()
-            showNewNote = true
+            if purchases.hasAccess {
+                showNewNote = true
+            } else {
+                NotificationCenter.default.post(name: .jottShowPaywall, object: nil)
+            }
         } label: {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 20, weight: .semibold))
@@ -527,19 +536,21 @@ struct IOSLibraryView: View {
             }
             .tint(Color(red: 0.18, green: 0.72, blue: 0.42))
         } else {
-            Button(role: .destructive) {
-                noteStore.deleteNote(note.id)
-                if selectedNote?.id == note.id { selectedNote = nil }
-            } label: {
-                swipeLabel("Delete", icon: "trash.fill")
+            if purchases.hasAccess {
+                Button(role: .destructive) {
+                    noteStore.deleteNote(note.id)
+                    if selectedNote?.id == note.id { selectedNote = nil }
+                } label: {
+                    swipeLabel("Delete", icon: "trash.fill")
+                }
+                Button {
+                    noteStore.togglePin(note.id)
+                } label: {
+                    swipeLabel(note.isPinned ? "Unpin" : "Pin",
+                               icon: note.isPinned ? "pin.slash.fill" : "pin.fill")
+                }
+                .tint(Color(red: 0.98, green: 0.62, blue: 0.12))
             }
-            Button {
-                noteStore.togglePin(note.id)
-            } label: {
-                swipeLabel(note.isPinned ? "Unpin" : "Pin",
-                           icon: note.isPinned ? "pin.slash.fill" : "pin.fill")
-            }
-            .tint(Color(red: 0.98, green: 0.62, blue: 0.12))
             Button {
                 noteToShare = note
             } label: {
@@ -565,7 +576,11 @@ struct IOSLibraryView: View {
         ToolbarItem(placement: .navigationBarTrailing) {
             if !isSearching && !isRecentlyDeleted {
                 Button {
-                    showNewFolder = true
+                    if purchases.hasAccess {
+                        showNewFolder = true
+                    } else {
+                        NotificationCenter.default.post(name: .jottShowPaywall, object: nil)
+                    }
                 } label: {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 17, weight: .medium))
@@ -788,66 +803,47 @@ private struct NoteCard: View {
             ZStack(alignment: .top) {
                 // Depth layers for notes that have subnotes
                 if subnoteCount > 0 {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(ds.surfaceAlt.opacity(0.6))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(ds.hairline, lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill((ds.isDark ? Color(red: 0.08, green: 0.08, blue: 0.10) : Color(red: 0.11, green: 0.11, blue: 0.13)).opacity(0.6))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.05), lineWidth: 0.5))
                         .padding(.horizontal, 10)
                         .offset(y: 7)
 
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(ds.surfaceAlt.opacity(0.8))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(ds.hairline, lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill((ds.isDark ? Color(red: 0.08, green: 0.08, blue: 0.10) : Color(red: 0.11, green: 0.11, blue: 0.13)).opacity(0.8))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.05), lineWidth: 0.5))
                         .padding(.horizontal, 5)
                         .offset(y: 3.5)
                 }
 
                 // Main card
                 VStack(alignment: .leading, spacing: 0) {
-                    // Metadata row
-                    HStack(spacing: 0) {
-                        Text(jottMetaDate(note.modifiedAt))
-                            .font(.jottMono(10, weight: .medium))
-                            .foregroundStyle(ds.inkFaintest)
-                            .tracking(0.4)
-                        Spacer()
-                        if note.isPinned {
-                            Text("PINNED")
-                                .font(.jottMono(9, weight: .medium))
-                                .foregroundStyle(ds.accent.opacity(0.45))
-                                .tracking(0.6)
-                                .padding(.trailing, 6)
-                        }
-                        Text(jottRelativeDate(note.modifiedAt))
-                            .font(.jottMono(10))
-                            .foregroundStyle(ds.inkFaintest)
-                            .tracking(0.4)
-                    }
-
-                    Spacer().frame(height: 10)
+                    Spacer().frame(height: 18)
 
                     Text(highlightedAttributedString(
                         preview.title,
                         matching: searchQuery,
                         size: 15, weight: .medium,
-                        baseColor: ds.ink,
+                        baseColor: Color(white: 0.96),
                         highlightColor: ds.accent
                     ))
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineSpacing(1)
+                    .lineSpacing(2)
 
                     if !preview.body.isEmpty {
-                        Spacer().frame(height: 7)
+                        Spacer().frame(height: 6)
                         Text(highlightedAttributedString(
                             preview.body,
                             matching: searchQuery,
                             size: 13,
-                            baseColor: ds.inkMute,
+                            baseColor: ds.accent.opacity(0.85),
                             highlightColor: ds.accent
                         ))
+                        .italic()
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -880,17 +876,46 @@ private struct NoteCard: View {
                         }
                     }
 
+                    Spacer().frame(height: 16)
+
+                    // Footer
+                    HStack(spacing: 0) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(Color(white: 0.30))
+                            Text("SAVED · \(jottRelativeDate(note.modifiedAt).uppercased())")
+                                .font(.jottMono(9))
+                                .foregroundStyle(Color(white: 0.30))
+                                .tracking(0.3)
+                        }
+                        Spacer()
+                        if note.isPinned {
+                            Text("PINNED")
+                                .font(.jottMono(9, weight: .medium))
+                                .foregroundStyle(ds.accent.opacity(0.40))
+                                .tracking(0.5)
+                                .padding(.trailing, 8)
+                        }
+                        Text(jottMetaDate(note.modifiedAt))
+                            .font(.jottMono(9))
+                            .foregroundStyle(Color(white: 0.30))
+                            .tracking(0.3)
+                    }
+
                     Spacer().frame(height: 14)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
+                .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(ds.surface))
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(ds.isDark ? Color(red: 0.10, green: 0.10, blue: 0.12) : Color(red: 0.13, green: 0.13, blue: 0.15))
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .strokeBorder(
-                            isSelected ? ds.accentRing : ds.hairline,
-                            lineWidth: isSelected ? 1.5 : 1
+                            isSelected ? ds.accentRing : Color.white.opacity(0.07),
+                            lineWidth: isSelected ? 1.5 : 0.5
                         )
                 )
             }

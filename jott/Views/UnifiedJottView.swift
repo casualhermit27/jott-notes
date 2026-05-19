@@ -371,12 +371,15 @@ private extension View {
 
 struct JottCaptureView: View {
     @ObservedObject var viewModel: OverlayViewModel
+    @ObservedObject private var purchases = PurchaseManager.shared
     @State private var showFormat = false
     @State private var showHelp = false
     @State private var dropdownReady = false
     @AppStorage("jott_hasSeenWelcome") private var hasSeenWelcome: Bool = false
     @AppStorage("jott_autoPasteClipboard") private var autoPasteClipboard: Bool = false
     @AppStorage("jott_showHelpButton") private var showHelpButton: Bool = true
+    @AppStorage("jott_hasSeenOnboarding") private var hasSeenOnboarding: Bool = false
+    @State private var onboardStep: Int = 0
 
     @ObservedObject private var speech = SpeechManager.shared
     @State private var voicePrefix = ""
@@ -427,11 +430,11 @@ struct JottCaptureView: View {
         switch cmd {
         case .search: return "search"
         case .inbox: return "recent"
-        case .today: return "today"
         }
     }
 
     private var dropdownStateID: String {
+        if !hasSeenOnboarding && onboardStep == 0 { return "none" }
         if viewModel.inputText == "?" {
             return "help"
         }
@@ -454,7 +457,7 @@ struct JottCaptureView: View {
             return "command-\(kind)"
         }
         if viewModel.inputText.isEmpty && viewModel.commandMode == nil && !viewModel.isForcedCreationMode {
-            if !hasSeenWelcome { return "welcome" }
+            if !hasSeenWelcome && hasSeenOnboarding { return "welcome" }
         }
         return "none"
     }
@@ -709,13 +712,30 @@ struct JottCaptureView: View {
                 toolbarRow
                     .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
 
-                JottInputArea(viewModel: viewModel,
-                              showFormat: $showFormat,
-                              dropdownVisible: showsDropdown && dropdownReady,
-                              onToggleVoice: toggleVoice,
-                              micInside: false)
+                if purchases.hasAccess {
+                    JottInputArea(viewModel: viewModel,
+                                  showFormat: $showFormat,
+                                  dropdownVisible: showsDropdown && dropdownReady,
+                                  onToggleVoice: toggleVoice,
+                                  micInside: false)
+                        .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
+                        .colorScheme(.dark)
+                } else {
+                    JottLockedBar { PurchaseManager.shared.showPaywall() }
+                        .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
+                }
+
+                // ── Onboarding lives inside the bar shape ──────────────────
+                if !hasSeenOnboarding && dropdownReady && purchases.hasAccess {
+                    JottOnboardingCard(step: onboardStep, viewModel: viewModel) {
+                        withAnimation(JottMotion.content) {
+                            hasSeenOnboarding = true
+                            hasSeenWelcome = true
+                        }
+                    }
                     .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
-                    .colorScheme(.dark)
+                    .transition(.opacity.animation(JottMotion.content))
+                }
             }
             .background(
                 JottBarShape(bottomRadius: viewModel.morphRadius)
@@ -728,8 +748,10 @@ struct JottCaptureView: View {
                 .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
 
             // ── Floating actions ───────────────────────────────────────────
-            floatingActions
-                .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
+            if hasSeenOnboarding {
+                floatingActions
+                    .modifier(ContentRevealModifier(visible: viewModel.contentVisible))
+            }
 
             Spacer()
         }
@@ -752,6 +774,21 @@ struct JottCaptureView: View {
                 resetVoiceState()
             }
         }
+        // Onboarding step 0 → 1: user typed something
+        .onChange(of: viewModel.inputText) { _, text in
+            if !hasSeenOnboarding, onboardStep == 0, !text.isEmpty {
+                withAnimation(JottMotion.content) { onboardStep = 1 }
+            }
+        }
+        // Onboarding step 1 → done: user activated a slash command
+        .onChange(of: viewModel.commandMode) { _, mode in
+            if !hasSeenOnboarding, onboardStep == 1, mode != nil {
+                withAnimation(JottMotion.content) {
+                    hasSeenOnboarding = true
+                    hasSeenWelcome = true
+                }
+            }
+        }
         .background(JottDropSurface(viewModel: viewModel))
     }
 }
@@ -761,13 +798,11 @@ struct JottCaptureView: View {
 enum JottCommand: Equatable {
     case search(query: String)
     case inbox
-    case today
 
     init?(input: String) {
         guard input.hasPrefix("/") else { return nil }
         let raw = input.dropFirst()
         let trimmed = raw.lowercased().trimmingCharacters(in: .whitespaces)
-        if trimmed == "today" || trimmed == "t" { self = .today; return }
         if trimmed == "search" || trimmed == "s" || trimmed.hasPrefix("search ") || trimmed.hasPrefix("s ") {
             let query: String
             if trimmed.hasPrefix("search ") {
@@ -855,9 +890,6 @@ struct JottInputArea: View {
         case .inbox:
             return TypeBadgeInfo(label: "Recent", icon: "clock",
                                  tint: .secondary)
-        case .today:
-            return TypeBadgeInfo(label: "Today", icon: "sun.max",
-                                 tint: .orange)
         }
     }
 
@@ -942,7 +974,10 @@ struct JottInputArea: View {
                         onUndo: {
                             viewModel.undo()
                         },
-                        onHeightChange: handleHeightChange
+                        onHeightChange: handleHeightChange,
+                        onDoCommand: { sel, tv in
+                            captureDoCommand(sel: sel, tv: tv, viewModel: viewModel)
+                        }
                     )
 
                     if showHintOverlay {
@@ -1888,14 +1923,12 @@ struct JottCommandResults: View {
         switch command {
         case .search:    return "Search"
         case .inbox:     return "Recent"
-        case .today:     return "Today"
         }
     }
     private var sectionIcon: String {
         switch command {
         case .search:    return "magnifyingglass"
         case .inbox:     return "clock"
-        case .today:     return "sun.max"
         }
     }
     private var sectionAccent: Color {
@@ -1904,49 +1937,45 @@ struct JottCommandResults: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if case .today = command {
-                JottTodayView(viewModel: viewModel)
+            if case .search = command {
+                // no section header for search — clean list
             } else {
-                if case .search = command {
-                    // no section header for search — clean list
-                } else {
-                    ResultsSectionHeader(title: label, icon: sectionIcon, accent: sectionAccent,
-                                         count: items.isEmpty ? nil : items.count)
-                }
+                ResultsSectionHeader(title: label, icon: sectionIcon, accent: sectionAccent,
+                                     count: items.isEmpty ? nil : items.count)
+            }
 
-                if items.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: sectionIcon)
-                            .font(.system(size: 20, weight: .light))
-                            .foregroundColor(.secondary.opacity(0.22))
-                        Text("Nothing here yet")
-                            .font(.system(size: 12.5))
-                            .foregroundColor(.secondary.opacity(0.35))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.scale(scale: 0.92, anchor: .center).combined(with: .opacity)
-                        .animation(JottMotion.content))
-                } else if case .search(let q) = command {
-                    SearchTileGrid(items: items, viewModel: viewModel,
-                                   selectedIndex: viewModel.selectedCommandIndex,
-                                   highlightQuery: q.isEmpty ? nil : q)
-                        .colorScheme(.dark)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView(showsIndicators: false) {
-                            VStack(spacing: 0) {
-                                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                    JottRow(item: item, viewModel: viewModel,
-                                            isSelected: index == viewModel.selectedCommandIndex)
-                                        .id(index)
-                                }
+            if items.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: sectionIcon)
+                        .font(.system(size: 20, weight: .light))
+                        .foregroundColor(.secondary.opacity(0.22))
+                    Text("Nothing here yet")
+                        .font(.system(size: 12.5))
+                        .foregroundColor(.secondary.opacity(0.35))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.scale(scale: 0.92, anchor: .center).combined(with: .opacity)
+                    .animation(JottMotion.content))
+            } else if case .search(let q) = command {
+                SearchTileGrid(items: items, viewModel: viewModel,
+                               selectedIndex: viewModel.selectedCommandIndex,
+                               highlightQuery: q.isEmpty ? nil : q)
+                    .colorScheme(.dark)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                JottRow(item: item, viewModel: viewModel,
+                                        isSelected: index == viewModel.selectedCommandIndex)
+                                    .id(index)
                             }
-                            .padding(.bottom, 6)
-                            .animation(JottMotion.content, value: items.map(\.id))
                         }
-                        .onChange(of: viewModel.selectedCommandIndex) { _, idx in
-                            proxy.scrollTo(idx)
-                        }
+                        .padding(.bottom, 6)
+                        .animation(JottMotion.content, value: items.map(\.id))
+                    }
+                    .onChange(of: viewModel.selectedCommandIndex) { _, idx in
+                        proxy.scrollTo(idx)
                     }
                 }
             }
@@ -1987,14 +2016,6 @@ let allCommandChips: [CommandChip] = [
         icon: "magnifyingglass",
         insert: "/search ",
         accent: .jottOverlaySelectorAccent
-    ),
-    CommandChip(
-        key: "today",
-        label: "Today",
-        shorthand: "/t",
-        icon: "sun.max",
-        insert: "/today",
-        accent: .orange
     ),
     CommandChip(
         key: "recent",
@@ -2096,7 +2117,8 @@ struct JottSlashCommandPicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(filteredChips, id: \.key) { chip in
+            ForEach(Array(filteredChips.enumerated()), id: \.element.key) { index, chip in
+                let isKeyboardFocused = index == viewModel.chipFocusIndex
                 Button {
                     if let cmd = JottCommand(input: chip.insert) {
                         viewModel.activateCommandMode(cmd)
@@ -2118,7 +2140,7 @@ struct JottSlashCommandPicker: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
-                    .background(hoveredKey == chip.key ? Color.white.opacity(0.055) : Color.clear)
+                    .background((hoveredKey == chip.key || isKeyboardFocused) ? Color.white.opacity(0.055) : Color.clear)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -2329,69 +2351,6 @@ private struct JottBarNoteCard: View {
 }
 
 // MARK: - Today View
-
-struct JottTodayView: View {
-    @ObservedObject var viewModel: OverlayViewModel
-
-    private let cal = Calendar.current
-
-    private var todayItems: [TimelineItem] {
-        viewModel.getAllReminders()
-            .filter { !$0.isCompleted && cal.isDateInToday($0.dueDate) }
-            .sorted { $0.dueDate < $1.dueDate }
-            .map { TimelineItem.reminder($0) }
-    }
-
-    private var recentNotes: [Note] {
-        Array(viewModel.getAllNotes().prefix(4))
-    }
-
-    private var pendingItems: [TimelineItem] {
-        let now = Date()
-        return viewModel.getAllReminders()
-            .filter { !$0.isCompleted && $0.dueDate < now && !cal.isDateInToday($0.dueDate) }
-            .sorted { $0.dueDate > $1.dueDate }
-            .prefix(3)
-            .map { TimelineItem.reminder($0) }
-    }
-
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
-                if todayItems.isEmpty && recentNotes.isEmpty && pendingItems.isEmpty {
-                    Text("Nothing for today")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary.opacity(0.4))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 36)
-                } else {
-                    if !todayItems.isEmpty {
-                        ResultsSectionHeader(title: "TODAY", icon: "sun.max",
-                                             accent: .jottReminderAccent, count: todayItems.count)
-                        ForEach(todayItems, id: \.id) { item in
-                            JottRow(item: item, viewModel: viewModel, isSelected: false)
-                        }
-                    }
-                    if !recentNotes.isEmpty {
-                        ResultsSectionHeader(title: "RECENT", icon: "clock.arrow.circlepath",
-                                             accent: .jottNoteAccent, count: recentNotes.count)
-                        ForEach(recentNotes) { note in
-                            JottRow(item: .note(note), viewModel: viewModel, isSelected: false)
-                        }
-                    }
-                    if !pendingItems.isEmpty {
-                        ResultsSectionHeader(title: "PENDING", icon: "exclamationmark.circle",
-                                             accent: .jottReminderAccent, count: pendingItems.count)
-                        ForEach(pendingItems, id: \.id) { item in
-                            JottRow(item: item, viewModel: viewModel, isSelected: false)
-                        }
-                    }
-                }
-            }
-            .padding(.bottom, 6)
-        }
-    }
-}
 
 // MARK: - Native Text Input (NSViewRepresentable for cursor color + clear background)
 
@@ -2733,6 +2692,110 @@ final class JottDropReceivingView: NSView {
     }
 }
 
+// MARK: - Capture input keyboard navigation
+
+/// Handles arrow-key and Tab navigation for the Jott bar capture input.
+/// Called from LibraryNoteTextEditor.onDoCommand so the actual delegate (LibraryNoteTextEditor.Coordinator)
+/// can dispatch these events. Returns true if the event was consumed.
+@MainActor
+func captureDoCommand(sel: Selector, tv: NSTextView, viewModel: OverlayViewModel) -> Bool {
+    // ── Slash picker chip navigation ──────────────────────────────────────
+    if viewModel.commandMode == nil,
+       viewModel.currentCommand == nil,
+       viewModel.inputText.hasPrefix("/"),
+       !viewModel.isForcedCreationMode {
+        let query = String(viewModel.inputText.dropFirst()).lowercased()
+        let chips = query.isEmpty ? allCommandChips : allCommandChips.filter {
+            $0.label.lowercased().hasPrefix(query) ||
+            String($0.insert.dropFirst()).lowercased().hasPrefix(query) ||
+            String($0.shorthand.dropFirst()).hasPrefix(query)
+        }
+        if !chips.isEmpty {
+            if sel == #selector(NSResponder.moveDown(_:)) {
+                viewModel.chipFocusIndex = max(0, min(viewModel.chipFocusIndex + 1, chips.count - 1))
+                return true
+            }
+            if sel == #selector(NSResponder.moveUp(_:)) {
+                viewModel.chipFocusIndex = max(-1, viewModel.chipFocusIndex - 1)
+                return true
+            }
+            let focused = viewModel.chipFocusIndex
+            if focused >= 0,
+               sel == #selector(NSResponder.insertNewline(_:)) ||
+               sel == #selector(NSResponder.insertTab(_:)) {
+                let chip = chips[focused]
+                if let cmd = JottCommand(input: chip.insert) {
+                    viewModel.activateCommandMode(cmd)
+                    tv.string = ""
+                    tv.setSelectedRange(NSRange(location: 0, length: 0))
+                    viewModel.inputText = ""
+                }
+                viewModel.chipFocusIndex = -1
+                return true
+            }
+        }
+    }
+
+    // ── Tab: autocomplete a /command suggestion ───────────────────────────
+    if sel == #selector(NSResponder.insertTab(_:)),
+       !viewModel.isForcedCreationMode,
+       viewModel.inputText.hasPrefix("/"),
+       (viewModel.commandMode == nil || viewModel.isTypingNewCommand) {
+        let query = viewModel.inputText.lowercased().dropFirst()
+        let match = allCommandChips.first {
+            $0.label.lowercased().hasPrefix(query) ||
+            String($0.shorthand.dropFirst()).hasPrefix(query) ||
+            String($0.insert.dropFirst()).hasPrefix(query)
+        }
+        if let match, let cmd = JottCommand(input: match.insert) {
+            viewModel.activateCommandMode(cmd)
+            tv.string = ""
+            tv.setSelectedRange(NSRange(location: 0, length: 0))
+            viewModel.inputText = ""
+            return true
+        }
+    }
+
+    // ── Command results navigation ────────────────────────────────────────
+    if viewModel.currentCommand != nil {
+        let items = viewModel.currentCommandItems()
+        if !items.isEmpty {
+            if sel == #selector(NSResponder.moveDown(_:)) ||
+               sel == #selector(NSResponder.moveRight(_:)) {
+                viewModel.moveCommandSelection(by: 1)
+                return true
+            }
+            if sel == #selector(NSResponder.moveUp(_:)) ||
+               sel == #selector(NSResponder.moveLeft(_:)) {
+                viewModel.moveCommandSelection(by: -1)
+                return true
+            }
+            if sel == #selector(NSResponder.insertTab(_:)) {
+                if viewModel.inlineEditingId != nil {
+                    viewModel.saveInlineEdit()
+                } else {
+                    viewModel.startInlineEdit()
+                    if viewModel.inlineEditingId == nil { viewModel.openSelectedCommandItem() }
+                }
+                return true
+            }
+        }
+    }
+
+    // ── Cmd+D: mark selected reminder done ────────────────────────────────
+    if sel == #selector(NSResponder.deleteToEndOfLine(_:)) {
+        let items = viewModel.currentCommandItems()
+        guard !items.isEmpty else { return false }
+        let idx = max(0, min(viewModel.selectedCommandIndex, items.count - 1))
+        if case .reminder(let r) = items[idx] {
+            viewModel.markReminderDone(r.id)
+            return true
+        }
+    }
+
+    return false
+}
+
 struct JottNativeInput: NSViewRepresentable {
     @Binding var text: String
     let viewModel: OverlayViewModel
@@ -3052,6 +3115,44 @@ struct JottNativeInput: NSViewRepresentable {
         }
 
         func textView(_ tv: NSTextView, doCommandBy sel: Selector) -> Bool {
+            // Slash picker chip keyboard navigation (when "/" shows command chips, not result list)
+            if parent.viewModel.commandMode == nil,
+               parent.viewModel.currentCommand == nil,
+               parent.viewModel.inputText.hasPrefix("/"),
+               !parent.viewModel.isForcedCreationMode {
+                let query = String(parent.viewModel.inputText.dropFirst()).lowercased()
+                let chips = query.isEmpty ? allCommandChips : allCommandChips.filter {
+                    $0.label.lowercased().hasPrefix(query) ||
+                    String($0.insert.dropFirst()).lowercased().hasPrefix(query) ||
+                    String($0.shorthand.dropFirst()).hasPrefix(query)
+                }
+                if !chips.isEmpty {
+                    if sel == #selector(NSResponder.moveDown(_:)) {
+                        let next = min(parent.viewModel.chipFocusIndex + 1, chips.count - 1)
+                        parent.viewModel.chipFocusIndex = max(0, next)
+                        return true
+                    }
+                    if sel == #selector(NSResponder.moveUp(_:)) {
+                        parent.viewModel.chipFocusIndex = max(-1, parent.viewModel.chipFocusIndex - 1)
+                        return true
+                    }
+                    let focused = parent.viewModel.chipFocusIndex
+                    if focused >= 0,
+                       sel == #selector(NSResponder.insertNewline(_:)) ||
+                       sel == #selector(NSResponder.insertTab(_:)) {
+                        let chip = chips[focused]
+                        if let cmd = JottCommand(input: chip.insert) {
+                            parent.viewModel.activateCommandMode(cmd)
+                            tv.string = ""
+                            tv.setSelectedRange(NSRange(location: 0, length: 0))
+                            parent.text = ""
+                        }
+                        parent.viewModel.chipFocusIndex = -1
+                        return true
+                    }
+                }
+            }
+
             // Enter or Shift+Enter → insert a newline, continuing list if on a list line
             if sel == #selector(NSResponder.insertNewline(_:)) ||
                sel == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
@@ -3641,7 +3742,7 @@ struct JottWelcomeCard: View {
             VStack(alignment: .leading, spacing: 7) {
                 tipRow("⌥⌥", "Open Jott from anywhere")
                 tipRow("Type anything", "Saves as a note instantly")
-                tipRow("/today", "See today's reminders")
+                tipRow("/recent", "See recent notes")
                 tipRow("⌘⇧M", "Capture with your voice")
             }
 
@@ -3675,7 +3776,164 @@ struct JottWelcomeCard: View {
     }
 }
 
-// MARK: - Onboarding Overlay
+// MARK: - Locked bar (trial ended)
+
+private struct JottLockedBar: View {
+    let onUpgrade: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("Your trial has ended.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.90))
+
+            Text("Your notes are safe.")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(.white.opacity(0.45))
+
+            Button(action: onUpgrade) {
+                Text("Unlock Jott  ·  $12.99")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .tracking(0.3)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        Color(red: 0.545, green: 0.361, blue: 0.965),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+        }
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Onboarding Card
+
+struct JottOnboardingCard: View {
+    let step: Int
+    @ObservedObject var viewModel: OverlayViewModel
+    let onSkip: () -> Void
+
+    @State private var glowPulse = false
+    @State private var floatOffset: CGFloat = 0
+    @State private var shimmer = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if step == 0 {
+                stepZero
+            } else {
+                stepOne
+            }
+        }
+        .colorScheme(.dark)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                glowPulse = true
+                floatOffset = -4
+            }
+            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                shimmer = true
+            }
+        }
+    }
+
+    // ── Step 0: type to capture ──────────────────────────────────────────
+    private var stepZero: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(glowPulse ? 0.07 : 0.02))
+                        .frame(width: 52, height: 52)
+                        .blur(radius: glowPulse ? 10 : 6)
+                    Text("✦")
+                        .font(.system(size: 22))
+                        .foregroundColor(.white.opacity(glowPulse ? 0.90 : 0.55))
+                        .offset(y: floatOffset)
+                }
+
+                VStack(spacing: 6) {
+                    Text("Type anything to capture it")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text("Notes save the moment you type. No button needed.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.40))
+                        .multilineTextAlignment(.center)
+                }
+
+                HStack(spacing: 16) {
+                    stepDot(active: true)
+                    stepDot(active: false)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 18)
+
+            Divider().opacity(0.08)
+
+            HStack {
+                Spacer()
+                skipButton
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+    }
+
+    // ── Step 1: slash commands ───────────────────────────────────────────
+    private var stepOne: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                stepDot(active: false)
+                stepDot(active: true)
+            }
+            .padding(.leading, 16)
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                Text("Type")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.35))
+                Text("/")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white.opacity(glowPulse ? 0.80 : 0.45))
+                    .scaleEffect(glowPulse ? 1.12 : 1.0)
+                Text("to try a slash command")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+
+            Spacer()
+
+            skipButton
+                .padding(.trailing, 16)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func stepDot(active: Bool) -> some View {
+        Circle()
+            .fill(active ? Color.white : Color.white.opacity(0.18))
+            .frame(width: 5, height: 5)
+    }
+
+    private var skipButton: some View {
+        Button(action: onSkip) {
+            Text("Skip")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.30))
+        }
+        .buttonStyle(.plain)
+    }
+}
 
 // MARK: - Help Popover
 
@@ -3704,7 +3962,6 @@ struct JottHelpPopover: View {
                     helpRow("[ ] ", "Task / checkbox")
                 }
                 helpSection("COMMANDS") {
-                    helpRow("/today  /t", "Today's items")
                     helpRow("/search  /s", "Search everything")
                     helpRow("/recent  /r", "Recent notes")
                 }

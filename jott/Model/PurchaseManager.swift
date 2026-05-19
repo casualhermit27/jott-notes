@@ -10,7 +10,7 @@ final class PurchaseManager: ObservableObject {
     @Published private(set) var isInTrial: Bool = false
     @Published private(set) var offerings: Offerings?
 
-    private let entitlementID = "pro"
+    private let entitlementID = "Jott Pro"
     private static var didConfigure = false
 
     private init() {}
@@ -44,6 +44,15 @@ final class PurchaseManager: ObservableObject {
 
     func showPaywall() {
         NotificationCenter.default.post(name: .jottShowPaywall, object: nil)
+    }
+
+    func activateTestPro() {
+        isProActive = true
+        isInTrial = false
+    }
+
+    func deactivateTestPro() {
+        isProActive = false
     }
 
     var hasAccess: Bool { isProActive || TrialManager.shared.isActive }

@@ -4,10 +4,14 @@ import RevenueCat
 
 struct JottSettingsView: View {
     @ObservedObject private var updates = UpdateManager.shared
-    @StateObject private var purchases = PurchaseManager.shared
+    @ObservedObject private var purchases = PurchaseManager.shared
     @AppStorage("jott_autoPasteClipboard") private var autoPasteClipboard: Bool = false
     @AppStorage("jott_showHelpButton") private var showHelpButton: Bool = true
+    @AppStorage("jott_hasSeenOnboarding") private var hasSeenOnboarding: Bool = false
+    @AppStorage("jott_hasSeenWelcome") private var hasSeenWelcome: Bool = false
     @State private var showPaywall = false
+    @State private var showFeedback = false
+    @State private var showDebug = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -94,7 +98,13 @@ struct JottSettingsView: View {
                     }
                     .toggleStyle(.switch)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 8)
+
+                    Text("Jott monitors the clipboard in the background to detect copied content when the bar opens.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 16)
 
                     sectionDivider
 
@@ -112,23 +122,13 @@ struct JottSettingsView: View {
                     }
                     .toggleStyle(.switch)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 12)
 
-                    sectionDivider
-
-                    // MARK: - Updates
-                    sectionHeader("UPDATES", icon: "arrow.clockwise")
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(updates.updateChannel == "app_store" ? "Channel: App Store" : "Channel: Direct distribution (Sparkle)")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        Button("Check for Updates") {
-                            updates.checkForUpdates()
-                        }
-                        .controlSize(.small)
-                        .disabled(!updates.sparkleEnabled)
+                    Button("Replay Onboarding") {
+                        hasSeenOnboarding = false
+                        hasSeenWelcome = false
                     }
+                    .controlSize(.small)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
 
@@ -154,6 +154,30 @@ struct JottSettingsView: View {
                     .controlSize(.small)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 20)
+
+                    sectionDivider
+
+                    // MARK: - Support
+                    sectionHeader("SUPPORT", icon: "bubble.left.and.bubble.right")
+
+                    settingsRow(icon: "exclamationmark.bubble", label: "Send Feedback") {
+                        showFeedback = true
+                    }
+                    .popover(isPresented: $showFeedback, arrowEdge: .trailing) {
+                        MacFeedbackPopover()
+                    }
+                    .padding(.horizontal, 20)
+
+                    Divider().padding(.horizontal, 20)
+
+                    settingsRow(icon: "ladybug", label: "Debug Info") {
+                        showDebug = true
+                    }
+                    .popover(isPresented: $showDebug, arrowEdge: .trailing) {
+                        MacDebugPopover()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
                 }
             }
         }
@@ -162,6 +186,29 @@ struct JottSettingsView: View {
         .sheet(isPresented: $showPaywall) {
             PaywallView()
         }
+    }
+
+    // MARK: - Row
+
+    @ViewBuilder
+    private func settingsRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 18)
+                Text(label)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundColor(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 7)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
@@ -184,6 +231,177 @@ struct JottSettingsView: View {
 
     private var sectionDivider: some View {
         Divider().padding(.horizontal, 20)
+    }
+}
+
+// MARK: - Feedback popover (macOS)
+
+private struct MacFeedbackPopover: View {
+    @ObservedObject private var purchases = PurchaseManager.shared
+    @State private var name = ""
+    @State private var body_ = ""
+    @State private var sending = false
+    @State private var sent = false
+
+    private var rcID: String { Purchases.shared.appUserID }
+    private var canSend: Bool { !body_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Send Feedback")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.primary)
+
+            TextField("Your name (optional)", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+                .disabled(sent)
+
+            ZStack(alignment: .topLeading) {
+                if body_.isEmpty {
+                    Text("What's the bug or feedback?")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 7)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $body_)
+                    .font(.system(size: 12))
+                    .frame(width: 280, height: 100)
+                    .disabled(sent)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1))
+
+            Button {
+                sendFeedback()
+            } label: {
+                ZStack {
+                    if sent {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Sent!")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .transition(.scale(scale: 0.7).combined(with: .opacity))
+                    } else if sending {
+                        ProgressView().scaleEffect(0.7).transition(.opacity)
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Send")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(canSend ? .white : Color.secondary)
+                        .transition(.opacity)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 28)
+                .background(
+                    sent ? Color.green : (canSend ? Color(red: 0.42, green: 0.28, blue: 0.88) : Color.secondary.opacity(0.12)),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: sent)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend || sending || sent)
+        }
+        .padding(16)
+        .frame(width: 312)
+    }
+
+    private func sendFeedback() {
+        guard canSend else { return }
+        sending = true
+        let subject = "Jott Feedback\(name.isEmpty ? "" : " from \(name)")"
+        let body = body_ + "\n\n---\nRC ID: \(rcID)\nTrial: \(TrialManager.shared.isActive)\nPro: \(purchases.isProActive)"
+        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let encodedBody    = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let url = URL(string: "mailto:harshachaganti12@gmail.com?subject=\(encodedSubject)&body=\(encodedBody)") {
+            NSWorkspace.shared.open(url)
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+                sending = false; sent = true
+            }
+        }
+    }
+}
+
+// MARK: - Debug popover (macOS)
+
+private struct MacDebugPopover: View {
+    @ObservedObject private var purchases = PurchaseManager.shared
+    @State private var copiedID = false
+    private var rcID: String { Purchases.shared.appUserID }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Debug Info")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.primary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("REVENUECAT ID")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                HStack(spacing: 8) {
+                    Text(rcID)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(rcID, forType: .string)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { copiedID = true }
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.8))
+                            withAnimation { copiedID = false }
+                        }
+                    } label: {
+                        Image(systemName: copiedID ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(copiedID ? .green : Color.secondary)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.65), value: copiedID)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text("Trial active")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(TrialManager.shared.isActive ? "Yes · \(TrialManager.shared.daysRemaining)d left" : "No")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(TrialManager.shared.isActive ? Color(red: 0.42, green: 0.28, blue: 0.88) : .secondary)
+            }
+
+            HStack {
+                Text("Pro active")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(purchases.isProActive ? "Yes" : "No")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(purchases.isProActive ? .green : .secondary)
+            }
+
+        }
+        .padding(16)
+        .frame(width: 280)
     }
 }
 

@@ -1,9 +1,13 @@
 import CloudKit
 import Foundation
+import Combine
 
 @MainActor
-final class CloudKitSyncManager {
+final class CloudKitSyncManager: ObservableObject {
     static let shared = CloudKitSyncManager()
+
+    @Published var syncError: String? = nil
+    private var syncErrorClearTask: Task<Void, Never>?
 
     private let container = CKContainer(identifier: "iCloud.com.casualhermit.jott")
     private lazy var database = container.privateCloudDatabase
@@ -52,6 +56,22 @@ final class CloudKitSyncManager {
     }
 
     private init() {}
+
+    private func reportSyncError(_ message: String) {
+        syncError = message
+        syncErrorClearTask?.cancel()
+        syncErrorClearTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled {
+                syncError = nil
+            }
+        }
+    }
+
+    func dismissSyncError() {
+        syncErrorClearTask?.cancel()
+        syncError = nil
+    }
 
     func setupSubscription() {
         Task {
@@ -167,7 +187,19 @@ final class CloudKitSyncManager {
         do {
             let status = try await container.accountStatus()
             guard status == .available else {
+                let message: String
+                switch status {
+                case .noAccount:
+                    message = "iCloud sync unavailable — no account signed in."
+                case .restricted:
+                    message = "iCloud sync is restricted on this device."
+                case .couldNotDetermine:
+                    message = "Could not determine iCloud account status."
+                default:
+                    message = "iCloud is unavailable (\(status))."
+                }
                 NSLog("[Jott] iCloud unavailable for sync: \(String(describing: status))")
+                reportSyncError(message)
                 return
             }
 
@@ -187,8 +219,13 @@ final class CloudKitSyncManager {
 
             let remoteAttachments = try await fetchAll(recordType: RecordType.attachment)
             try mergeAttachments(remoteAttachments, into: store)
+
+            // Clear any previous sync error on success.
+            syncErrorClearTask?.cancel()
+            syncError = nil
         } catch {
             NSLog("[Jott] CloudKit sync failed: \(error.localizedDescription)")
+            reportSyncError("Sync failed: \(error.localizedDescription)")
         }
     }
 

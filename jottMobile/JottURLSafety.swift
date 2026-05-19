@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum JottURLSafety {
     static let allowedSchemes: Set<String> = ["http", "https", "mailto"]

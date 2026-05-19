@@ -42,6 +42,7 @@ final class OverlayViewModel: ObservableObject {
             activateSlashCommandIfNeeded() // strip /search, /today, /recent → sets commandMode
             detectType()
             updateCommandSelectionIfNeeded()
+            chipFocusIndex = -1
             scheduleInputAutoSave()
         }
     }
@@ -129,6 +130,7 @@ final class OverlayViewModel: ObservableObject {
     @Published var editingNoteText: String = ""
     @Published var editingNoteBlocks: [Block] = []
     @Published var selectedCommandIndex: Int = 0
+    @Published var chipFocusIndex: Int = -1
 
     // Subnote context — when set, new notes are created as subnotes of this note
     @Published var subnoteParentId: UUID? = nil
@@ -231,7 +233,7 @@ final class OverlayViewModel: ObservableObject {
 
     // MARK: - Slash command auto-activation
 
-    /// When user types a recognized slash command (/s, /search, /t, /today, /r, /recent),
+    /// When user types a recognized slash command (/s, /search, /r, /recent),
     /// auto-activate the corresponding command mode and strip the prefix from the input
     /// so that any typed query is preserved and the slash text does not linger.
     private func activateSlashCommandIfNeeded() {
@@ -256,6 +258,7 @@ final class OverlayViewModel: ObservableObject {
     // MARK: - Session-based auto-save (debounced 0.8s)
     /// Saves (or updates) the single note for this open session
     private func commitSession(showFeedback: Bool = true) {
+        guard PurchaseManager.shared.hasAccess else { PurchaseManager.shared.showPaywall(); return }
         let raw = inputText.trimmingCharacters(in: .whitespaces)
         guard !raw.isEmpty || !draftTables.isEmpty else { return }
 
@@ -602,7 +605,6 @@ final class OverlayViewModel: ObservableObject {
             if isTypingNewCommand {
                 switch mode {
                 case .inbox: return .inbox
-                case .today: return .today
                 default:     return mode
                 }
             }
@@ -637,12 +639,6 @@ final class OverlayViewModel: ObservableObject {
             let notes = getAllNotes().map { TimelineItem.note($0) }
             let reminders = getAllReminders().map { TimelineItem.reminder($0) }
             return (notes + reminders).sorted { $0.date > $1.date }
-        case .today:
-            let cal = Calendar.current
-            return getAllReminders()
-                .filter { !$0.isCompleted && cal.isDateInToday($0.dueDate) }
-                .sorted { $0.dueDate < $1.dueDate }
-                .map { TimelineItem.reminder($0) }
         }
     }
 
@@ -1015,22 +1011,19 @@ final class OverlayViewModel: ObservableObject {
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
 
-        // Resolve which mode to preview for
-        let isDateMode: Bool
         if let mode = commandMode {
             switch mode {
             default: return nil
             }
         } else if let forced = forcedType {
             switch forced {
-            case .reminder: isDateMode = true
+            case .reminder: break
             default: return nil
             }
         } else {
             return nil
         }
 
-        guard isDateMode else { return nil }
         let result  = NaturalLanguageParser.parseForEvent(from: text)
         let rec     = NaturalLanguageParser.extractRecurrence(from: text)
         let date    = commandModeDateOverride ?? result.date
@@ -1043,15 +1036,6 @@ final class OverlayViewModel: ObservableObject {
         guard let mode = commandMode else { return false }
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return false }
-        let result = NaturalLanguageParser.parseForEvent(from: text)
-        let rec    = NaturalLanguageParser.extractRecurrence(from: text)
-        let date   = commandModeDateOverride ?? result.date
-
-        let timeFmt: DateFormatter = {
-            let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
-        }()
-        let timeStr = timeFmt.string(from: date)
-
         switch mode {
         default:
             return false

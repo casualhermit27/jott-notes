@@ -7,6 +7,9 @@ struct PaywallView: View {
     @State private var isPurchasing = false
     @State private var isRestoring = false
     @State private var errorMessage: String?
+    @State private var loadingTimedOut = false
+    @State private var retryCount = 0
+    @State private var timeoutTask: DispatchWorkItem?
 
     private let features: [(String, String)] = [
         ("note.text",       "Unlimited notes"),
@@ -89,59 +92,113 @@ struct PaywallView: View {
                 }
 
                 // CTA
-                VStack(spacing: 9) {
-                    Button {
-                        Task { await buyLifetime() }
-                    } label: {
-                        ZStack {
-                            if isPurchasing {
-                                ProgressView().controlSize(.small).tint(.white)
+                if loadingTimedOut && purchases.offerings == nil {
+                    VStack(spacing: 9) {
+                        Text("Couldn't load pricing")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
+                        Text("Check your connection and try again.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Button {
+                            loadingTimedOut = false
+                            retryCount += 1
+                            startTimeout()
+                            Task { await purchases.fetchOfferings() }
+                        } label: {
+                            Text("Try Again")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 3)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            Task { await restore() }
+                        } label: {
+                            if isRestoring {
+                                ProgressView().controlSize(.mini)
                             } else {
-                                VStack(spacing: 2) {
-                                    Text("Get Lifetime Access")
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    if let price = purchases.offerings?.current?.lifetime?.localizedPriceString {
-                                        Text("One-time \(price) — no subscription")
-                                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                                            .opacity(0.82)
+                                Text("Restore Purchase")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isRestoring)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 18)
+                } else {
+                    VStack(spacing: 9) {
+                        Button {
+                            Task { await buyLifetime() }
+                        } label: {
+                            ZStack {
+                                if isPurchasing {
+                                    ProgressView().controlSize(.small).tint(.white)
+                                } else if purchases.offerings == nil {
+                                    ProgressView().controlSize(.small).tint(.white)
+                                } else {
+                                    VStack(spacing: 2) {
+                                        Text("Get Lifetime Access")
+                                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        if let price = purchases.offerings?.current?.lifetime?.localizedPriceString {
+                                            Text("One-time \(price) — no subscription")
+                                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                                .opacity(0.82)
+                                        }
                                     }
                                 }
                             }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 3)
                         }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 3)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isPurchasing || isRestoring)
+                        .buttonStyle(.plain)
+                        .disabled(isPurchasing || isRestoring || purchases.offerings == nil)
 
-                    Button {
-                        Task { await restore() }
-                    } label: {
-                        if isRestoring {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Text("Restore Purchase")
-                                .font(.system(size: 11, design: .rounded))
-                                .foregroundStyle(.secondary)
+                        Button {
+                            Task { await restore() }
+                        } label: {
+                            if isRestoring {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Text("Restore Purchase")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(isPurchasing || isRestoring)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isPurchasing || isRestoring)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 18)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-                .padding(.bottom, 18)
             }
             .frame(width: 300)
             .background(Color(NSColor.windowBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .onChange(of: purchases.isProActive) { active in
+            .onChange(of: purchases.isProActive) { _, active in
                 if active { dismiss() }
             }
+            .onChange(of: purchases.offerings) { _, offerings in
+                if offerings != nil {
+                    timeoutTask?.cancel()
+                    timeoutTask = nil
+                }
+            }
             .task {
+                startTimeout()
                 await purchases.fetchOfferings()
             }
 
@@ -157,11 +214,22 @@ struct PaywallView: View {
         }
     }
 
+    private func startTimeout() {
+        timeoutTask?.cancel()
+        let work = DispatchWorkItem {
+            if purchases.offerings == nil {
+                loadingTimedOut = true
+            }
+        }
+        timeoutTask = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+    }
+
     private func buyLifetime() async {
         errorMessage = nil
         guard let offerings = try? await Purchases.shared.offerings(),
               let package = offerings.current?.lifetime else {
-            errorMessage = "Product unavailable. Try again later."
+            errorMessage = "Pricing unavailable right now. You may be offline — connect and try again."
             return
         }
         isPurchasing = true
@@ -170,7 +238,7 @@ struct PaywallView: View {
             try await purchases.purchase(package)
         } catch {
             if (error as NSError).code != 2 {
-                errorMessage = "Purchase failed. Please try again."
+                errorMessage = "Purchase didn't go through. Please try again."
             }
         }
     }
@@ -182,10 +250,10 @@ struct PaywallView: View {
         do {
             try await purchases.restore()
             if !purchases.isProActive {
-                errorMessage = "No previous purchase found."
+                errorMessage = "No purchase found. Make sure you're signed in to the Apple ID used to buy Jott."
             }
         } catch {
-            errorMessage = "Restore failed. Please try again."
+            errorMessage = "Restore didn't complete. Check your connection and try again."
         }
     }
 }
